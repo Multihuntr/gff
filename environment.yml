@@ -1,0 +1,14 @@
+name: flood
+channels:
+  - conda-forge
+  # - pytorch
+  # - nvidia
+dependencies:
+  - tensorflow-gpu
+  - cdsapi
+  - geopandas
+  - pyogrio
+  - rasterio
+  - numba
+  # - pytorch
+  # - pytorch-cuda 11.8

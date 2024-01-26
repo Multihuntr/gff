@@ -1,0 +1,7 @@
+dem/*.csv
+envs
+*.sublime-*
+.vscode
+**/__pycache__
+data
+_*.py

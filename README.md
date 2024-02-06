@@ -111,6 +111,17 @@ River gauge estimation
 * Purpose: P2
 
 
+# ERA5-Land from Google Earth Engine
+
+I need daily-aggregated ERA5-Land for the NeuralHydrology models which is not provided natively from CDS. Theoretically, we could download the ERA5-Land archive and reprocess to daily values. But the whole archive is terrabytes large, the api has strong rate limits and I don't need hourly (at least, not everywhere all the time). Instead - presumably because of prior research - a daily reprocessed version is on Google Earth Engine.
+
+I have some preferences:
+1. I'd rather not be locked into using earth engine
+2. I want to do arbitrary training on my machine
+3. I have limited disk space.
+4. I want to use a Google-trained model using the daily aggregates, anyway.
+
+Thus, I decided to use `earthengine-api` to export the ERA5-Land files to my Drive and then download that file using `google-api-python-client` (which comes with `earthengine-api`). See `dl-era5-land.py` for more details of this process.
 
 
 [1]: https://g.co/floodhub

@@ -1,14 +1,18 @@
 name: flood
 channels:
   - conda-forge
-  # - pytorch
-  # - nvidia
+  - pytorch
+  - nvidia
 dependencies:
-  - tensorflow-gpu
   - cdsapi
   - geopandas
   - pyogrio
   - rasterio
-  - numba
-  # - pytorch
-  # - pytorch-cuda 11.8
+  - earthengine-api
+  - pytorch
+  - pytorch-cuda 11.8
+  - torchvision
+  - einops # for kurosiwo
+  - vit-pytorch
+  - xarray
+  - rioxarray

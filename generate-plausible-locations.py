@@ -105,14 +105,12 @@ def find_overlaps(basins_df: geopandas.GeoDataFrame, floods_df: geopandas.GeoDat
     Returns:
         geopandas.GeoDataFrame: Inner join of Basins and floods which overlap
     """
-    overlapped = []
-    total = 0
     # Some flood polygons self intersect (e.g. bowtie);
     # applying buffer(0) makes it valid by creating a single outer boundary
     floods_df = floods_df.to_crs(basins_df.crs)
     floods_df.geometry = floods_df.geometry.buffer(0)
 
-    # Join by overlap area > 0.
+    # Join by overlap area > 0 - keeping the basin geometry
     joined = basins_df.sjoin(floods_df, how="inner", rsuffix="flood")
     return joined
 

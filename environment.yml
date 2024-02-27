@@ -12,7 +12,9 @@ dependencies:
   - pytorch
   - pytorch-cuda 11.8
   - torchvision
-  - einops # for kurosiwo
+  - einops
   - vit-pytorch
   - xarray
   - rioxarray
+  - dask
+  - netcdf4

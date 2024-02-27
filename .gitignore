@@ -5,3 +5,8 @@ envs
 **/__pycache__
 data
 _*.py
+scraps
+.netrc
+snappy/Orbits
+snappy/dem
+caravan/split

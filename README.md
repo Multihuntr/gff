@@ -36,7 +36,7 @@ All data is publicly available, but some need an account to download. Here is th
 
 ## Data
 
-Population Map
+Population Map (UNUSED)
 * WorldPop - Top-down unconstrained Global mosaic 1km
 * Source: https://hub.worldpop.org/geodata/summary?id=24777 (Accessed 17/01/2024)
 * More detail: https://www.worldpop.org/methods/top_down_constrained_vs_unconstrained/
@@ -56,10 +56,20 @@ Global past flood events
 * Purpose: P1
 
 River gauge/discharge data
-* Caravan
-* Source: https://zenodo.org/records/7944025
+* Caravan v1.3
+* Source: https://zenodo.org/records/7944025 (Accessed ??/01/2024)
 * Size: 15GB
-* Purpose: P2, P3
+* Purpose: P2, P3, P5
+```bash
+# IMPORTANT: Also download grdc
+# (This snippet assumes you are one folder above the root of the Caravan dataset,
+#  and downloads/adds the GRDC extension into it)
+wget -O grdc.tar.gz "https://zenodo.org/records/10074416/files/caravan-grdc-extension-nc.tar.gz?download=1"
+tar -xf grdc.tar.gz
+mv GRDC-Caravan-extension-nc/timeseries/netcdf/grdc Caravan/timeseries/netcdf/
+mv GRDC-Caravan-extension-nc/attributes/grdc Caravan/attributes/
+mv GRDC-Caravan-extension-nc/shapefiles/grdc Caravan/shapefiles/
+```
 
 Coastal gauge data
 * GESLA-3
@@ -67,26 +77,29 @@ Coastal gauge data
 * Size: 38GB
 * Purpose: P5
 
-Global storm surge predictions (TODO)
+Global storm surge predictions
 * Source:
-* Size:
+    - GTSM (https://cds.climate.copernicus.eu/cdsapp#!/dataset/sis-water-level-change-timeseries-cmip6?tab=overview)
+    - See `scripts/dl-gtsm.py`
+* Size: 840MB
 * Purpose: P4
 
-Global 90m DEM (TODO: After plausible sites are determined)
+Global 1s DEM
 * Source:
+    - Rehosted by Australia for some reason? https://ecat.ga.gov.au/geonetwork/srv/eng/catalog.search#/metadata/72759
     - https://spacedata.copernicus.eu/documents/20123/121286/Copernicus+DEM+Open+HTTPS+Access.pdf/36c9adad-8488-f463-af43-573e68b7f481?t=1669283200177
     - https://prism-dem-open.copernicus.eu/pd-desk-open-access/publicDemURLs
 * Size:
 * Purpose: P4
 
-Local weather parameters (ERA5-Land) (TODO: After plausible sites are determined)
+Global weather parameters (ERA5-Land)
 * Source:
     - https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-single-levels?tab=overview
-    - See `scripts/download-era5.py`
+    - See `scripts/dl-era5-land.py`
 * Size:
 * Purpose: P2, P3
 
-Hand-labelled flood maps (TODO: After specific test sites determined)
+Hand-labelled flood maps (WONTDO: Kuro Siwo casts doubt on applicability, and isn't global)
 * Copernicus Emergency Mapping Service
 * Source: [Archives][5] and API
 * Size:
@@ -123,6 +136,14 @@ I have some preferences:
 
 Thus, I decided to use `earthengine-api` to export the ERA5-Land files to my Drive and then download that file using `google-api-python-client` (which comes with `earthengine-api`). See `dl-era5-land.py` for more details of this process.
 
+
+# Sentinel-1 preprocessing
+
+Worked from this dockerfile to figure out how to install locally: https://github.com/snap-contrib/docker-snap
+Used this tutorial to figure out how to use snappy: https://step.esa.int/docs/tutorials/Performing%20SAR%20processing%20in%20Python%20using%20snappy.pdf
+Used `asf_search` to download S1 images.
+TODO: Follow riverways?
+TODO: Generate tiles that cover the same locations and run KuroSiwo model on both their data and the reprocessed version, ensuring roughly equivalent predictions.
 
 [1]: https://g.co/floodhub
 [2]: https://hess.copernicus.org/articles/26/4013/2022/

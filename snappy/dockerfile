@@ -1,0 +1,11 @@
+FROM python:3.6
+
+ENV SNAP_VERSION="9_0_0"
+
+ADD install_snappy.sh .
+RUN ./install_snappy.sh
+
+RUN mkdir code
+ADD preprocess.py code/
+
+ENTRYPOINT [ "python3", "code/preprocess.py" ]

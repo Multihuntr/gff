@@ -20,6 +20,10 @@ The main points that I will change for a real project is to:
 If you see any important optimisations missing, please let me know.
 """
 
+raise NotImplementedError(
+    "This code is out of date, and not used. Especially check x/y before using this."
+)
+
 import argparse
 import sys
 from pathlib import Path

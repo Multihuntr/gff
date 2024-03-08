@@ -7,6 +7,6 @@ data
 _*.py
 scraps
 .netrc
-snappy/Orbits
-snappy/dem
+preprocessing/Orbits
+preprocessing/dem
 caravan/split

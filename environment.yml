@@ -13,8 +13,9 @@ dependencies:
   - pytorch-cuda 11.8
   - torchvision
   - einops
-  - vit-pytorch
   - xarray
   - rioxarray
   - dask
   - netcdf4
+  - richdem
+  - asf_search

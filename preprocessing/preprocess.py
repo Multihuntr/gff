@@ -19,7 +19,7 @@ OPTS = {
         "sigmaStr": "0.9",
     },
 }
-# The closest I can find is Frost 7x7 with damping "2"
+
 OPT_RANGES = {
     "orbit": {"polyDegree": [2]},
     "speckle": {
@@ -37,15 +37,17 @@ OPT_RANGES = {
 }
 
 
-def _str_list_to_java(str_list):
-    return snappy.jpy.array("java.lang.String", str_list)
-
-
-def _dict_to_java(d):
-    out_dict = snappy.HashMap()
-    for k, v in d.items():
-        out_dict.put(k, v)
-    return out_dict
+def _to_java(obj):
+    if isinstance(obj, list):
+        return snappy.jpy.array("java.lang.String", obj)
+    elif isinstance(obj, dict):
+        out_dict = snappy.HashMap()
+        for k, v in obj.items():
+            out_dict.put(k, v)
+        return out_dict
+    else:
+        # ¯\_(ツ)_/¯
+        return obj
 
 
 def apply_orbit(product, opts=OPTS["orbit"]):
@@ -58,14 +60,14 @@ def apply_orbit(product, opts=OPTS["orbit"]):
 
 def remove_thermal_noise(product, bands=["VV", "VH"]):
     parameters = snappy.HashMap()
-    parameters.put("selectedPolarisations", _str_list_to_java(bands))
+    parameters.put("selectedPolarisations", _to_java(bands))
     parameters.put("removeThermalNoise", "true")
     return snappy.GPF.createProduct("ThermalNoiseRemoval", parameters, product)
 
 
 def remove_border_noise(product, bands=["VV", "VH"]):
     parameters = snappy.HashMap()
-    parameters.put("selectedPolarisations", _str_list_to_java(bands))
+    parameters.put("selectedPolarisations", _to_java(bands))
     # parameters.put("borderLimit", ??)
     # parameters.put("trimThreshold", ??)
     return snappy.GPF.createProduct("Remove-GRD-Border-Noise", parameters, product)
@@ -83,16 +85,16 @@ def subset(product, wkt):
 def calibration(product, bands=["VV", "VH"]):
     parameters = snappy.HashMap()
     parameters.put("outputSigmaBand", True)
-    parameters.put("sourceBands", _str_list_to_java([f"Intensity_{band}" for band in bands]))
-    parameters.put("selectedPolarisations", _str_list_to_java(bands))
+    parameters.put("sourceBands", _to_java([f"Intensity_{band}" for band in bands]))
+    parameters.put("selectedPolarisations", _to_java(bands))
     parameters.put("outputImageScaleInDb", False)
     return snappy.GPF.createProduct("Calibration", parameters, product)
 
 
 def speckleFilter(product, bands=["VV", "VH"], opts=OPTS["speckle"]):
-    parameters = _dict_to_java(opts)
+    parameters = _to_java(opts)
 
-    parameters.put("sourceBands", _str_list_to_java([f"Sigma0_{band}" for band in bands]))
+    parameters.put("sourceBands", _to_java([f"Sigma0_{band}" for band in bands]))
 
     return snappy.GPF.createProduct("Speckle-Filter", parameters, product)
 
@@ -101,7 +103,7 @@ def terrainCorrection(product, bands=["VV", "VH"]):
     parameters = snappy.HashMap()
     parameters.put("demName", "SRTM 1Sec HGT")
     parameters.put("pixelSpacingInMeter", 10.0)
-    parameters.put("sourceBands", _str_list_to_java([f"Sigma0_{band}" for band in bands]))
+    parameters.put("sourceBands", _to_java([f"Sigma0_{band}" for band in bands]))
     parameters.put("mapProjection", "EPSG:3857")
     return snappy.GPF.createProduct("Terrain-Correction", parameters, product)
 
@@ -126,8 +128,10 @@ def parse_args(argv):
     parser = argparse.ArgumentParser("Default preprocessing for a Sentinel-1 image.")
 
     parser.add_argument("zip_path", type=str, help="Path to Sentinel-1 zip download")
-    parser.add_argument("aoi_wkt", type=str, help="Area of Interest (AOI) in WKT format")
     parser.add_argument("out_path", type=str, help="Where to save output")
+    parser.add_argument(
+        "--aoi_wkt", type=str, default=None, help="Area of Interest (AOI) in WKT format"
+    )
     parser.add_argument("--sweep", action="store_true", help="Sweep various configs")
     parser.add_argument("--explain", type=str, default=None, help="Describe params for op")
     parser.add_argument("--incl_dem", action="store_true", help="Also ouput the equivalent DEM")
@@ -157,11 +161,11 @@ def do_preprocess(args, opts, expand_filename=False):
     # Read only the area of interest from the image
     product_in = snappy.ProductIO.readProduct(args.zip_path)
     # snappy.showProductInformation(product_in)
-    product_orbitfile = apply_orbit(product_in, opts=opts["orbit"])
-    product_subset = subset(product_orbitfile, args.aoi_wkt)
+    product_out = apply_orbit(product_in, opts=opts["orbit"])
+    if args.aoi_wkt is not None:
+        product_out = subset(product_out, args.aoi_wkt)
 
     # Apply processing steps
-    product_out = product_subset
     product_out = remove_border_noise(product_out)
     product_out = remove_thermal_noise(product_out)
     product_out = calibration(product_out)
@@ -171,7 +175,7 @@ def do_preprocess(args, opts, expand_filename=False):
     if args.incl_dem:
         product_out = add_dem_band(product_out, args.dem_name)
 
-    snappy.ProductIO.writeProduct(product_out, file_path, "GeoTIFF")
+    snappy.ProductIO.writeProduct(product_out, file_path, "GeoTIFF-BigTIFF")
 
 
 def split_copied_iterable(opts):

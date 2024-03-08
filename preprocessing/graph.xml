@@ -1,0 +1,47 @@
+<graph id="KuroSiwoPreprocessingGraph">
+    <!-- https://step.esa.int/docs/tutorials/SNAP_CommandLine_Tutorial.pdf -->
+    <version>1.0</version>
+    <node id="OrbitApplied">
+        <operator>Apply-Orbit-File</operator>
+        <sources>
+            <sourceProduct>${source}</sourceProduct>
+        </sources>
+        <parameters>
+            <polyDegree>2</polyDegree>
+        </parameters>
+    </node>
+    <node id="Calibrated">
+        <operator>Calibration</operator>
+        <sources>
+            <source>OrbitApplied</source>
+        </sources>
+        <parameters>
+            <sourceBands>Intensity_VV,Intensity_VH</sourceBands>
+            <selectedPolarisations>VV,VH</selectedPolarisations>
+        </parameters>
+    </node>
+    <node id="Filtered">
+        <operator>Speckle-Filter</operator>
+        <sources>
+            <source>Calibrated</source>
+        </sources>
+        <parameters>
+            <filter>Lee Sigma</filter>
+            <filterSizeX>5</filterSizeX>
+            <filterSizeY>5</filterSizeY>
+            <sigmaStr>0.9</sigmaStr>
+        </parameters>
+    </node>
+    <node id="Terrain">
+        <operator>Terrain-Correction</operator>
+        <sources>
+            <source>Filtered</source>
+        </sources>
+        <parameters>
+            <demName>SRTM 1Sec HGT</demName>
+            <pixelSpacingInMeter>10.0</pixelSpacingInMeter>
+            <sourceBands>Sigma0_VV,Sigma0_VH</sourceBands>
+            <mapProjection>EPSG:3857</mapProjection>
+        </parameters>
+    </node>
+</graph>

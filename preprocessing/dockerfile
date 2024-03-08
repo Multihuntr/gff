@@ -8,4 +8,7 @@ RUN ./install_snappy.sh
 RUN mkdir code
 ADD preprocess.py code/
 
-ENTRYPOINT [ "python3", "code/preprocess.py" ]
+ENV PATH="/usr/local/snap/bin/:$PATH"
+ADD graph.xml .
+ADD graph-w-dem.xml .
+# ENTRYPOINT [ "python3", "code/preprocess.py" ]

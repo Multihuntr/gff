@@ -21,8 +21,21 @@ Method to compare:
     2. I asked for `GRD`, but the results had a few different types. I found a `GRD_HD`, so I used that
     3. Put your credentials in `.asf_search` separated by `';'`.
     ```python
+    # Not necessarily working code:
     from pathlib import Path
-    result = [res for res in results if res.properties['processingLevel'] == 'GRD_HD'][0]
+    import asf_search as asf
+    start_date = datetime.datetime.fromisoformat(basin_shp["BEGAN"])
+    end_date = datetime.datetime.fromisoformat(basin_shp["ENDED"])
+
+    buffer = datetime.timedelta(days=10)
+    search_results = asf.geo_search(
+        intersectsWith=basin_shp.geometry.wkt,
+        platform=asf.PLATFORM.SENTINEL1,
+        processingLevel=asf.PRODUCT_TYPE.AMPLITUDE_GRD,
+        start=start_date - buffer,
+        end=end_date,
+    )
+    result = [res for res in search_results if res.properties['processingLevel'] == 'GRD_HD'][0]
     with open(".asf_auth") as f:
         username, password = f.read().strip().split(";")
     session = asf.ASFSession().auth_with_creds(username, password)

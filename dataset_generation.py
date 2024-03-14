@@ -1,11 +1,9 @@
-import datetime
 import functools
 import itertools
 import math
 from pathlib import Path
 
 import affine
-import asf_search as asf
 import geopandas
 import numpy as np
 import pandas as pd
@@ -99,6 +97,7 @@ def progressively_grow_floodmaps(
     geom: shapely.Geometry,
     floodmap_path: Path,
     flood_model: torch.nn.Module,
+    tile_size: int = 224,
     include_s1: bool = False,
     print_freq: int = 0,
 ):
@@ -110,7 +109,10 @@ def progressively_grow_floodmaps(
      - all tifs in inp_img_paths must match resolution and CRS.
      - geom must be in CRS of tifs
 
-    Thus the output is in the same CRS
+    Thus the output is in the same CRS.
+
+    The output will be aligned pixel-wise with the last input image, and the other inputs will
+    be resampled to match
     """
     # Open and check tifs
     inp_tifs = [rasterio.open(p) for p in inp_img_paths]
@@ -119,20 +121,25 @@ def progressively_grow_floodmaps(
 
     # Create tile_grid and initial set of tiles
     viable_footprint = shapely.intersection_all([util.image_footprint(tif) for tif in inp_tifs])
-    tile_grids = mk_grid(viable_footprint, ref_tif.transform, ref_tif.profile["blockxsize"])
+    tile_grids, viable_footprint = mk_grid(viable_footprint, ref_tif.transform, tile_size)
     tiles = tiles_along_river_within_geom(rivers_df, geom, tile_grids[(0, 0)], ref_tif.crs)
     visited = np.zeros_like(tile_grids[(0, 0)]).astype(bool)
-    flooded = np.zeros_like(tile_grids[(0, 0)]).astype(bool)
     grid_size = tile_grids[(0, 0)].shape
     offset_cache = {(0, 1): {}, (1, 0): {}, (1, 1): {}}
     if len(tiles) == 0:
         raise Exception("Provided geometry does not intersect any rivers")
 
     # Rasterio profile handling
+    outxlo, _, _, outyhi = viable_footprint.bounds
+    t = ref_tif.transform
+    new_transform = rasterio.transform.from_origin(outxlo, outyhi, t[0], -t[4])
     profile = {
         **ref_tif.profile,
         **constants.FLOODMAP_PROFILE_DEFAULTS,
         "nodata": 255,
+        "transform": new_transform,
+        "width": tile_grids[0, 0].shape[0] * tile_size,
+        "height": tile_grids[0, 0].shape[1] * tile_size,
     }
     out_tiles = []
     s1_tif = None
@@ -144,6 +151,9 @@ def progressively_grow_floodmaps(
             "ZLEVEL": 1,
             "PREDICTOR": 2,
             "count": s1_count,
+            "transform": transform,
+            "width": tile_grids[0, 0].shape[0] * tile_size,
+            "height": tile_grids[0, 0].shape[1] * tile_size,
         }
         s1_fpath = floodmap_path.with_stem(f"{floodmap_path.stem}_s1")
         s1_tif = rasterio.open(s1_fpath, "w", **s1_profile)
@@ -192,7 +202,7 @@ def progressively_grow_floodmaps(
     with rasterio.open(floodmap_path) as out_tif:
         floodmaps = out_tif.read()
     nan_mask = floodmaps == 255
-    floodmaps = postprocess_classes(floodmaps)
+    floodmaps = postprocess_classes(floodmaps[0], mask=(~nan_mask)[0])[None]
     floodmaps[nan_mask] = 255
     with rasterio.open(floodmap_path, "w", **profile) as out_tif:
         out_tif.write(floodmaps)
@@ -226,9 +236,11 @@ def mk_grid(geom: shapely.Geometry, transform: affine.Affine, gridsize: int):
     # Then translate grid back into CRS so that they align correctly across images
     for grid in grids.values():
         util.convert_affine_inplace(grid, transform)
+    new_geom = shapely.box(xlo, ylo, xhi, yhi)
+    pixel_aligned_geom = shapely.ops.transform(lambda x, y: transform * (x, y), new_geom)
 
     # Note this only works if all images these grids are applied to have the exact same resolution
-    return grids
+    return grids, pixel_aligned_geom
 
 
 def tiles_along_river_within_geom(rivers_df, geom, tile_grid, crs):
@@ -451,11 +463,10 @@ def load_rivers(hydroatlas_path: Path, threshold: int = 20000):
     return rivers_df
 
 
-def postprocess_classes(map, size_threshold=50):
-    # Smooth with a voting filter
-    kernel = skimage.morphology.ball(radius=3)
-    smoothed = skimage.filters.rank.modal(map, kernel)
-    smoothed = smoothed[0]
+def postprocess_classes(class_map, mask=None, size_threshold=50):
+    # Smooth edges
+    kernel = skimage.morphology.disk(radius=2)
+    smoothed = skimage.filters.rank.majority(class_map, kernel, mask=mask)
 
     # Remove "small" holes in non-background classes
     h, w = smoothed.shape
@@ -487,4 +498,4 @@ def postprocess_classes(map, size_threshold=50):
                     majority, _ = scipy.stats.mode(smoothed[slices], axis=None)
                     smoothed[slices][shp_mask] = majority
 
-    return smoothed[None]
+    return smoothed

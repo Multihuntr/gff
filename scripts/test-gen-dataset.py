@@ -9,7 +9,9 @@ import dataset_generation
 
 
 def parse_args(argv):
-    parser = argparse.ArgumentParser("Download Sentinel-1 GRD images from ASF")
+    parser = argparse.ArgumentParser(
+        "Test dataset main dataset generation function on known images"
+    )
 
     parser.add_argument("hydroatlas_path", type=Path)
     parser.add_argument("geom", type=shapely.from_wkt, default=None)

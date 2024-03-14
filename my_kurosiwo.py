@@ -218,11 +218,6 @@ def run_snunet_once(
 ):
     inps = util.get_tiles_single(imgs, geom, geom_in_px)
 
-    # Note: rasterio rounds bounds to the nearest integer, so this is slightly wrong
-    #  because we are resampling the DEM to geom, but not resampling the S1 images. But... eh.
-    #  This is not an issue while the geom is already on S1 pixel boundaries.
-    # TODO: Project rounded bounds into EPSG:4326, to get resampling which
-    #       guarantees match with S1 images
     geom_4326 = util.convert_crs(geom, geom_crs, "EPSG:4326")
     dem_coarse = get_dem(geom_4326)
     dem_fine = util.resample(dem_coarse, geom_4326.bounds, inps[0].shape[2:])

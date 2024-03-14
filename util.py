@@ -141,7 +141,7 @@ def get_tile(
     else:
         raise Exception("Either bounds or bounds_px must have a value")
 
-    result = tif.read(window=window)
+    result = tif.read(window=window, resampling=rasterio.enums.Resampling.bilinear)
 
     if isinstance(p, Path):
         tif.close()

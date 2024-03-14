@@ -1,6 +1,9 @@
 import datetime
 import math
+from pathlib import Path
+from typing import Union
 
+import affine
 import geopandas
 import pyproj
 import rasterio
@@ -8,16 +11,20 @@ import scipy.interpolate
 import shapely
 import numpy as np
 import pandas as pd
+import torch
 import xarray
 
 
 # Generic geometry utilities
 
 
-def rounded_bounds(arg):
+def rounded_bounds(arg, outer=True):
     if isinstance(arg, tuple) or (isinstance(arg, np.ndarray) and arg.shape == (4,)):
         xlo, ylo, xhi, yhi = arg
-        return math.floor(xlo), math.floor(ylo), math.ceil(xhi), math.ceil(yhi)
+        if outer:
+            return math.floor(xlo), math.floor(ylo), math.ceil(xhi), math.ceil(yhi)
+        else:
+            return math.ceil(xlo), math.ceil(ylo), math.floor(xhi), math.floor(yhi)
     elif isinstance(arg, shapely.Geometry):
         return rounded_bounds(shapely.bounds(arg))
     else:
@@ -41,8 +48,14 @@ def shapely_bounds_to_rasterio_window(bounds, transform=None):
     return ((ylo, yhi), (xlo, xhi))
 
 
-def image_footprint(tif_path):
-    with rasterio.open(tif_path) as tif:
+def image_footprint(tif_path: Union[Path, rasterio.DatasetReader]) -> shapely.Geometry:
+    """Create shape of image bounds in image CRS"""
+    if isinstance(tif_path, Path):
+        with rasterio.open(tif_path) as tif:
+            coords = np.array([[0, 0], [tif.width, tif.height]])
+            (xlo, ylo), (xhi, yhi) = np.array(tif.transform * coords.T).T
+    else:
+        tif = tif_path
         coords = np.array([[0, 0], [tif.width, tif.height]])
         (xlo, ylo), (xhi, yhi) = np.array(tif.transform * coords.T).T
     return shapely.box(xlo, ylo, xhi, yhi)
@@ -52,8 +65,8 @@ def mk_box_grid(width, height, x_offset=0, y_offset=0, box_width=1, box_height=1
     """
     Create a grid of box geometries, stored in a vectorised Shapely array.
     """
-    xs = np.arange(width) * box_height
-    ys = np.arange(height) * box_width
+    xs = np.arange(width // box_width) * box_width
+    ys = np.arange(height // box_height) * box_height
     yss, xss = np.meshgrid(ys, xs)
     # fmt: off
     coords = np.array([ # Clockwise squares
@@ -93,6 +106,13 @@ def convert_crs(shp: shapely.Geometry, _from: str, _to: str):
     return shapely.ops.transform(project, shp)
 
 
+def convert_affine_inplace(shp, transform: affine.Affine):
+    coords = shapely.get_coordinates(shp)
+    coords_transformed = np.array(transform * coords.T).T
+    shapely.set_coordinates(shp, coords_transformed)
+    return shp
+
+
 # Raster geometry utilities
 
 
@@ -101,6 +121,51 @@ def resample(arr: xarray.Dataset, bounds: tuple[int, int, int, int], size: tuple
     xs = np.linspace(xlo, xhi, size[1])
     ys = np.linspace(yhi, ylo, size[0])
     return arr.interp(x=xs, y=ys, method="linear", kwargs={"fill_value": "extrapolate"})
+
+
+def get_tile(
+    p: Union[Path, rasterio.DatasetReader],
+    bounds: tuple[float, float, float, float] = None,
+    bounds_px: tuple[int, int, int, int] = None,
+    bounds_in_px: bool = False,
+):
+    if isinstance(p, Path):
+        tif = rasterio.open(p)
+    else:
+        tif = p
+
+    if bounds is not None and not bounds_in_px:
+        window = shapely_bounds_to_rasterio_window(bounds, tif.transform)
+    elif (bounds is not None and bounds_in_px) or bounds_px is not None:
+        window = shapely_bounds_to_rasterio_window(bounds_px)
+    else:
+        raise Exception("Either bounds or bounds_px must have a value")
+
+    result = tif.read(window=window)
+
+    if isinstance(p, Path):
+        tif.close()
+
+    return result
+
+
+def get_tiles_single(imgs, geom: shapely.Geometry, geom_in_px: bool = False):
+    """Get window from a list of images for a single model run"""
+    inps = []
+    for p in imgs:
+        inp = get_tile(p, geom.bounds, bounds_in_px=geom_in_px)
+        inps.append(torch.tensor(inp)[None].cuda())
+    return inps
+
+
+def get_tiles_batched(imgs, geoms: shapely.Geometry, geom_in_px: bool = False):
+    """Get windows from a list of images for a batched model run"""
+    inps = []
+    for p in imgs:
+        img_windows = [get_tile(p, geom.bounds, bounds_in_px=geom_in_px) for geom in geoms]
+        img_batch = np.stack(img_windows)
+        inps.append(torch.tensor(img_batch).cuda())
+    return inps
 
 
 # Basin selection utilities

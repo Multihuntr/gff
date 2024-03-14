@@ -5,10 +5,12 @@ from pathlib import Path
 import random
 import subprocess
 import tempfile
+from typing import Union
 import urllib
 import tarfile
 import zipfile
 
+import affine
 import asf_search as asf
 import numpy as np
 import pyproj
@@ -207,28 +209,35 @@ def preprocess(
                 out_tif.write(data_block, window=window)
 
 
-def run_snunet_once(img_paths: list[Path], geom: shapely.Geometry, model: nn.Module):
-    inps = []
-    for p in img_paths:
-        with rasterio.open(p) as tif:
-            window = util.shapely_bounds_to_rasterio_window(geom.bounds, tif.transform)
-            inps.append(torch.tensor(tif.read(window=window)[None]).cuda())
+def run_snunet_once(
+    imgs,
+    geom: shapely.Geometry,
+    model: nn.Module,
+    geom_in_px: bool = False,
+    geom_crs: str = "EPSG:3857",
+):
+    inps = util.get_tiles_single(imgs, geom, geom_in_px)
+
     # Note: rasterio rounds bounds to the nearest integer, so this is slightly wrong
     #  because we are resampling the DEM to geom, but not resampling the S1 images. But... eh.
     #  This is not an issue while the geom is already on S1 pixel boundaries.
-    geom_4326 = util.convert_crs(geom, "EPSG:3857", "EPSG:4326")
+    # TODO: Project rounded bounds into EPSG:4326, to get resampling which
+    #       guarantees match with S1 images
+    geom_4326 = util.convert_crs(geom, geom_crs, "EPSG:4326")
     dem_coarse = get_dem(geom_4326)
     dem_fine = util.resample(dem_coarse, geom_4326.bounds, inps[0].shape[2:])
     dem_th = dem_fine.band_data.values
     out = model(inps, dem=dem_th)[0].cpu().numpy()
-    return out
+    return inps, dem_th, out
 
 
-def run_flood_vit_once(img_paths: list[Path], geom: shapely.Geometry, model: nn.Module):
-    inps = []
-    for p in img_paths:
-        with rasterio.open(p) as tif:
-            window = util.shapely_bounds_to_rasterio_window(geom.bounds, tif.transform)
-            inps.append(torch.tensor(tif.read(window=window)[None]).cuda())
+def run_flood_vit_once(imgs, geom: shapely.Geometry, model: nn.Module, geom_in_px: bool = False):
+    inps = util.get_tiles_single(imgs, geom, geom_in_px)
     out = model(inps)[0].cpu().numpy()
-    return out
+    return inps, out
+
+
+def run_flood_vit_batched(imgs, geoms: np.ndarray, model: nn.Module, geoms_in_px: bool = False):
+    inps = util.get_tiles_batched(imgs, geoms, geoms_in_px)
+    out = model(inps).cpu().numpy()
+    return inps, out

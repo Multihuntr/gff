@@ -7,7 +7,6 @@ FLOODMAP_PROFILE_DEFAULTS = {
     "COMPRESS": "DEFLATE",
     "ZLEVEL": 1,
     "PREDICTOR": 2,
-    "count": 3,
-    "descriptions": KUROSIWO_CLASS_NAMES,
+    "count": 1,
     "dtype": np.uint8,
 }

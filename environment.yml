@@ -19,3 +19,4 @@ dependencies:
   - netcdf4
   - richdem
   - asf_search
+  - skimage

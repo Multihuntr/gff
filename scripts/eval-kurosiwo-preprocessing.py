@@ -13,7 +13,7 @@ import torch.nn as nn
 import tqdm
 
 import constants
-import my_kurosiwo
+import data_sources
 import util
 
 
@@ -148,9 +148,9 @@ def main(args):
             target_onehot = onehot(targets, 3)
         shp = shapely.from_wkt(info["geom"])
         base_out_vit = run_kurosiwo_preprocessed_flood_vit(targets_path.parent, flood_vit)
-        _, mine_out_vit = my_kurosiwo.run_flood_vit_once(args.s1_image_paths, shp, flood_vit)
+        _, mine_out_vit = data_sources.run_flood_vit_once(args.s1_image_paths, shp, flood_vit)
         # base_out_snu = run_kurosiwo_preprocessed_snunet(targets_path.parent, snunet)
-        # _, _, mine_out_snu = my_kurosiwo.run_snunet_once(args.s1_image_paths[1:], shp, snunet)
+        # _, _, mine_out_snu = data_sources.run_snunet_once(args.s1_image_paths[1:], shp, snunet)
         base_out = base_out_vit  # + base_out_snu
         mine_out = mine_out_vit  # + mine_out_snu
         base_i, base_u = compare(onehot(base_out), target_onehot)

@@ -17,7 +17,7 @@ import skimage
 import torch
 
 import constants
-import my_kurosiwo
+import data_sources
 import util
 
 
@@ -42,12 +42,12 @@ def ensure_s1(img_folder, prefix, results, delete_intermediate=False):
     zip_fpaths, processed_fpaths = [], []
     for result in results:
         # Download image
-        zip_fpath = my_kurosiwo.download_s1(img_folder, result)
+        zip_fpath = data_sources.download_s1(img_folder, result)
         zip_fpaths.append(zip_fpath)
 
         # Run preprocessing on whole image
         dim_fname = Path(zip_fpath.with_name(zip_fpath.stem + "-processed.dim").name)
-        my_kurosiwo.preprocess(img_folder, zip_fpath.name, dim_fname)
+        data_sources.preprocess_s1(img_folder, zip_fpath.name, dim_fname)
         # DIMAP is a weird format. You ask it to save at ".dim" and it actually saves elsewhere
         # Anyway, need to combine the vv and vh bands into a single file for later merge
         data_path = img_folder / "tmp" / dim_fname.with_suffix(".data")
@@ -275,7 +275,7 @@ def progressively_grow_floodmaps(
             n_visited += 1
             tile_geom = tile_grids[(0, 0)][tile_x, tile_y]
             visit_tiles.append(tile_geom)
-            s1_inps, flood_logits = run_flood_model(inp_tifs, tile_geom, flood_model)
+            s1_inps, flood_logits = flood_model(inp_tifs, tile_geom)
             s1_inps = [t[0].cpu().numpy() for t in s1_inps]
             if not s1_preprocess_edge_heuristic(s1_inps):
                 n_outside += 1
@@ -311,11 +311,11 @@ def progressively_grow_floodmaps(
             # Logging
             if print_freq > 0 and n_visited % print_freq == 0 or len(tiles) == 0:
                 print(
-                    f"{len(tiles):6d} tiles open,",
-                    f"{n_visited:6d} tiles visited,",
-                    f"{n_flooded:6d} tiles flooded,",
-                    f"{n_permanent:6d} tiles in large bodies of water",
-                    f"{n_outside:6d} tiles outside legal bounds,",
+                    f"{len(tiles):6d} open",
+                    f"{n_visited:6d} visited",
+                    f"{n_flooded:6d} flooded",
+                    f"{n_permanent:6d} in large bodies of water",
+                    f"{n_outside:6d} outside legal bounds",
                 )
     if include_s1:
         s1_tif.close()
@@ -387,18 +387,13 @@ def tiles_along_river_within_geom(rivers_df, geom, tile_grid, crs):
     return list(zip(x, y))
 
 
-def run_flood_model(tifs, geom, model):
-    # TODO: Make fancy combinations of models
-    return my_kurosiwo.run_flood_vit_once(tifs, geom, model)
-
-
 def _ensure_logits(tifs, offset_tile_grid, x, y, flood_model, offset_cache):
     if (x, y) in offset_cache:
         return
     w, h = offset_tile_grid.shape
     if x >= 0 and y >= 0 and x < w and y < h:
         offset_tile_geom = offset_tile_grid[x, y]
-        _, offset_logits = run_flood_model(tifs, offset_tile_geom, flood_model)
+        _, offset_logits = flood_model(tifs, offset_tile_geom)
         offset_cache[(x, y)] = offset_logits
     else:
         offset_cache[(x, y)] = None
@@ -588,6 +583,39 @@ def load_rivers(hydroatlas_path: Path, threshold: int = 20000):
     rivers_df = geopandas.GeoDataFrame(pd.concat(rivers, ignore_index=True), crs=rivers[0].crs)
     rivers_df.to_file(river_path, engine="pyogrio")
     return rivers_df
+
+
+def run_snunet_once(
+    imgs,
+    geom: shapely.Geometry,
+    model: torch.nn.Module,
+    geom_in_px: bool = False,
+    geom_crs: str = "EPSG:3857",
+):
+    inps = util.get_tiles_single(imgs, geom, geom_in_px)
+
+    geom_4326 = util.convert_crs(geom, geom_crs, "EPSG:4326")
+    dem_coarse = data_sources.get_dem(geom_4326, shp_crs="EPSG:4326", folder=Path("preprocessing"))
+    dem_fine = util.resample(dem_coarse, geom_4326.bounds, inps[0].shape[2:])
+    dem_th = dem_fine.band_data.values
+    out = model(inps, dem=dem_th)[0].cpu().numpy()
+    return inps, dem_th, out
+
+
+def run_flood_vit_once(
+    imgs, geom: shapely.Geometry, model: torch.nn.Module, geom_in_px: bool = False
+):
+    inps = util.get_tiles_single(imgs, geom, geom_in_px)
+    out = model(inps)[0].cpu().numpy()
+    return inps, out
+
+
+def run_flood_vit_batched(
+    imgs, geoms: np.ndarray, model: torch.nn.Module, geoms_in_px: bool = False
+):
+    inps = util.get_tiles_batched(imgs, geoms, geoms_in_px)
+    out = model(inps).cpu().numpy()
+    return inps, out
 
 
 def postprocess_classes(class_map, mask=None, size_threshold=50):

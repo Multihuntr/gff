@@ -36,6 +36,8 @@ def parse_args(argv):
 def main(args):
     torch.set_grad_enabled(False)
     flood_model = torch.hub.load("Multihuntr/KuroSiwo", "vit_decoder", pretrained=True).cuda()
+    runner = dataset_generation.run_flood_vit_once
+    run_flood_model = lambda tifs, geom: runner(tifs, geom, flood_model)
     rivers = dataset_generation.load_rivers(args.hydroatlas_path)
 
     if not args.full:
@@ -44,7 +46,7 @@ def main(args):
             rivers,
             args.geom,
             args.out_path,
-            flood_model,
+            run_flood_model,
             include_s1=True,
             print_freq=100,
         )
@@ -63,11 +65,11 @@ def main(args):
         # Try to generate some floodmaps!
         if len(search_results["asc"]) > 0:
             dataset_generation.create_flood_maps(
-                args.img_path, search_results["asc"], basin_shp, rivers, flood_model
+                args.img_path, search_results["asc"], basin_shp, rivers, run_flood_model
             )
         elif len(search_results["desc"]) > 0:
             dataset_generation.create_flood_maps(
-                args.img_path, search_results["desc"], basin_shp, rivers, flood_model
+                args.img_path, search_results["desc"], basin_shp, rivers, run_flood_model
             )
         else:
             print("Not enough Sentinel-1 images at this location.")

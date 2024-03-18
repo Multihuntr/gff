@@ -3,27 +3,15 @@ import itertools
 import math
 import os
 from pathlib import Path
-import random
 import subprocess
-import tempfile
-from typing import Union
 import urllib
 import tarfile
 import zipfile
 
-import affine
 import asf_search as asf
-import numpy as np
-import pyproj
-import rasterio
-import shapely
-from torch import nn
-import torch
-import tqdm
 
 import xarray
 
-import constants
 import util
 
 
@@ -32,7 +20,19 @@ def download_url(url):
         return f.read()
 
 
-def get_cop_dem_file(north: int, east: int, name: str):
+def degrees_to_north_east(north: int, east: int):
+    ns = "N"
+    if north < 0:
+        ns = "S"
+        north = -north
+    ew = "E"
+    if east < 0:
+        ew = "W"
+        east = -east
+    return f"{ns}{north:02d}", f"{ew}{east:03d}"
+
+
+def get_cop_dem_file(north: int, east: int, name: str, folder: Path):
     """
     Allowed names:
         COP-DEM_GLO-30-DGED/2021_1
@@ -45,18 +45,13 @@ def get_cop_dem_file(north: int, east: int, name: str):
         COP-DEM_GLO-90-DTED/2023_1
     """
     # Check already downloaded
-    ns = "N"
-    if north < 0:
-        ns = "S"
-        north = -north
-    if east < 0:
-        ew = "W"
-        east = -east
-    tile_name = f"Copernicus_DSM_10_{ns}{north:02d}_00_{ew}{east:03d}_00"
-    final_fpath = Path("preprocessing") / "dem" / name / f"{tile_name}.tif"
+    north_str, east_str = degrees_to_north_east(north, east)
+    tile_name = f"Copernicus_DSM_10_{north_str}_00_{east_str}_00"
+    final_fpath = folder / "dem" / name / f"{tile_name}.tif"
     if final_fpath.exists():
         return final_fpath
     print(f"Downloading {tile_name}.tif to {final_fpath}")
+    final_fpath.mkdir(parents=True, exist_ok=True)
 
     # Download tar
     base_url = "https://prism-dem-open.copernicus.eu/pd-desk-open-access/prismDownload"
@@ -121,12 +116,33 @@ def get_dem_file(north: int, east: int, name: str = "COP-DEM_GLO-30-DTED__2023_1
         raise ValueError(f"Unknown DEM: '{name}'")
 
 
-def get_dem(shp, name="COP-DEM_GLO-30-DTED__2023_1", shp_crs="EPSG:4326"):
-    """
-    Get a dem for the shape with a minimal bounding box around it
-    shp must be in xy (lon, lat)
+def get_world_cover_file(north, east, folder):
+    base_url = "https://esa-worldcover.s3.eu-central-1.amazonaws.com"
+    year = 2021
+    ver = "v200"
 
-    Return xarray in minimal bounding box around shp
+    north_str, east_str = degrees_to_north_east(north, east)
+    tile = f"{north_str}{east_str}"
+    fname = f"ESA_WorldCover_10m_{year}_{ver}_{tile}_Map.tif"
+    fpath = folder / fname
+    if fpath.exists():
+        return fpath
+
+    url = f"{base_url}/{ver}/{year}/map/{fname}"
+    bin_data = download_url(url)
+    with open(fpath, "wb") as f:
+        f.write(bin_data)
+    return fpath
+
+
+def get_1x1_product(shp, shp_crs, folder, getter, **kwargs):
+    """
+    Get a product gridded at 1x1 degrees
+    with a minimal bounding box around it.
+
+    Saves downloaded product to folder.
+
+    Returns xarray in minimal bounding box around shp
     """
     if shp_crs != "EPSG:4326":
         util.convert_crs(shp, shp_crs, "EPSG:4326")
@@ -136,11 +152,19 @@ def get_dem(shp, name="COP-DEM_GLO-30-DTED__2023_1", shp_crs="EPSG:4326"):
     xlo, ylo, xhi, yhi = shp4326.bounds
     ew_ran = range(math.floor(xlo), math.ceil(xhi))
     ns_ran = range(math.floor(ylo), math.ceil(yhi))
-    dem_paths = [get_dem_file(ns, ew, name) for ew, ns in itertools.product(ew_ran, ns_ran)]
+    dem_paths = [getter(ns, ew, folder, **kwargs) for ew, ns in itertools.product(ew_ran, ns_ran)]
     dem = xarray.open_mfdataset(dem_paths)
     box = dem.sel(x=slice(xlo, xhi), y=slice(yhi, ylo))
 
     return box.compute()
+
+
+def get_world_cover(shp, shp_crs, folder):
+    return get_1x1_product(shp, shp_crs, folder, get_world_cover_file)
+
+
+def get_dem(shp, shp_crs, folder, name="COP-DEM_GLO-30-DTED__2023_1"):
+    return get_1x1_product(shp, shp_crs, folder, get_dem_file, name=name)
 
 
 def download_s1(img_folder, asf_result, cred_fname=".asf_auth"):
@@ -157,7 +181,7 @@ def download_s1(img_folder, asf_result, cred_fname=".asf_auth"):
     return zip_fpath
 
 
-def preprocess(img_folder: Path, s1_fname: Path, out_fname: Path):
+def preprocess_s1(img_folder: Path, s1_fname: Path, out_fname: Path):
     assert (img_folder / s1_fname).exists(), "Sentinel 1 file not downloaded"
     if (img_folder / "tmp" / out_fname).exists():
         return
@@ -184,32 +208,3 @@ def preprocess(img_folder: Path, s1_fname: Path, out_fname: Path):
 
     if not (img_folder / tmp_folder / out_fname).exists():
         raise Exception("Docker run failed for some reason.")
-
-
-def run_snunet_once(
-    imgs,
-    geom: shapely.Geometry,
-    model: nn.Module,
-    geom_in_px: bool = False,
-    geom_crs: str = "EPSG:3857",
-):
-    inps = util.get_tiles_single(imgs, geom, geom_in_px)
-
-    geom_4326 = util.convert_crs(geom, geom_crs, "EPSG:4326")
-    dem_coarse = get_dem(geom_4326)
-    dem_fine = util.resample(dem_coarse, geom_4326.bounds, inps[0].shape[2:])
-    dem_th = dem_fine.band_data.values
-    out = model(inps, dem=dem_th)[0].cpu().numpy()
-    return inps, dem_th, out
-
-
-def run_flood_vit_once(imgs, geom: shapely.Geometry, model: nn.Module, geom_in_px: bool = False):
-    inps = util.get_tiles_single(imgs, geom, geom_in_px)
-    out = model(inps)[0].cpu().numpy()
-    return inps, out
-
-
-def run_flood_vit_batched(imgs, geoms: np.ndarray, model: nn.Module, geoms_in_px: bool = False):
-    inps = util.get_tiles_batched(imgs, geoms, geoms_in_px)
-    out = model(inps).cpu().numpy()
-    return inps, out

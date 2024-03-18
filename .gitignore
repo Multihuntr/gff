@@ -10,3 +10,5 @@ scraps
 preprocessing/Orbits
 preprocessing/dem
 caravan/split
+*.tif
+*.png

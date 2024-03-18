@@ -50,8 +50,19 @@ def group_covers_geom(group, geom, prop=1.0):
     return group_footprint.intersection(geom).area >= (geom.area * prop)
 
 
+def min_timing(group, ref_ts, n):
+    before, after = 0, 0
+    for result in group:
+        ts = datetime.datetime.fromisoformat(result[0]["properties"]["startTime"]).timestamp()
+        if ts < ref_ts:
+            before += 1
+        else:
+            after += 1
+    return before >= n and after > 0
+
+
 def main(args):
-    shps = geopandas.read_file(args.gpkg_path, driver="pyogrio", where="BEGAN >= '2014-01-01'")
+    shps = geopandas.read_file(args.gpkg_path, engine="pyogrio", where="BEGAN >= '2014-01-01'")
     results_json_path = args.out_path.with_name(f"{args.out_path.stem}-raw.json")
     if results_json_path.exists():
         with results_json_path.open("r") as f:
@@ -69,7 +80,7 @@ def main(args):
             start_date = shp["BEGAN"].to_pydatetime()
             end_date = shp["ENDED"].to_pydatetime()
 
-            buffer = datetime.timedelta(days=10)
+            buffer = datetime.timedelta(days=60)
             search_results = asf.geo_search(
                 intersectsWith=shp.geometry.convex_hull.wkt,
                 platform=asf.PLATFORM.SENTINEL1,
@@ -95,7 +106,7 @@ def main(args):
     nab, ndb = 0, 0
     nad, ndd = 0, 0
     nac, ndc = 0, 0
-    basin_prop = 0.25
+    basin_prop = 0.05
     n_required = 3
     for i, shp in shps.iterrows():
         k = f"{shp.ID}-{shp.HYBAS_ID}"
@@ -124,6 +135,13 @@ def main(args):
         ascending = [g for g in ascending if group_covers_geom(g, shp.geometry, basin_prop)]
         descending = [g for g in descending if group_covers_geom(g, shp.geometry, basin_prop)]
 
+        # Ensure minimum timing: n-1 images before BEGAN and 1 image after
+        began_ts = shp["BEGAN"].to_pydatetime().timestamp()
+        if not min_timing(ascending, began_ts, n_required - 1):
+            ascending = []
+        if not min_timing(descending, began_ts, n_required - 1):
+            descending = []
+
         # Ensure at least n_required images available (don't know yet if we will use all three)
         if len(ascending) < n_required:
             ascending = []
@@ -141,7 +159,7 @@ def main(args):
             "ENDED": shp["ENDED"].to_pydatetime().isoformat(),
         }
     with args.out_path.open("w") as f:
-        json.dump(index, f)
+        json.dump(filtered_index, f)
 
     print(
         f"Number of times at least {n_required} images that touch the (basin x flood) shapes are available"

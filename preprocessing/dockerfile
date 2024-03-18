@@ -10,5 +10,3 @@ ADD preprocess.py code/
 
 ENV PATH="/usr/local/snap/bin/:$PATH"
 ADD graph.xml .
-ADD graph-w-dem.xml .
-# ENTRYPOINT [ "python3", "code/preprocess.py" ]

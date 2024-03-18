@@ -53,4 +53,4 @@ Method to compare:
 
 The chosen settings in `preprocess.py` are the result of some guesswork. The resulting tile looks almost the same, just resampling and some extra spots in their data. Otherwise effectively identical.
 
-TODO: DEM is definitely the correct DEM, but it is offset by a weird amount. Figure out why.
+For some reason the "AddElevation" operation does not add the DEM correctly, so I ended up writing my own version.

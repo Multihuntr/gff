@@ -1,16 +1,12 @@
 import argparse
-import datetime
-import itertools
 import json
 from pathlib import Path
 import sys
-import einops
 
 import numpy as np
 import rasterio
 import shapely
 import shapely.coordinates
-import sklearn.metrics
 
 import torch
 import torch.nn as nn
@@ -130,10 +126,14 @@ def main(args):
             "dtype": "uint8",
             "nodata": 255,
         }
-    ksw_tif = rasterio.open(f"ksw.tif", "w", **{**profile, "count": 1})
-    our_tif = rasterio.open(f"our.tif", "w", **{**profile, "count": 1})
-    ksw_logit_tif = rasterio.open(f"ksw_logit.tif", "w", **{**profile, "count": 3})
-    our_logit_tif = rasterio.open(f"our_logit.tif", "w", **{**profile, "count": 3})
+    ksw_tif = rasterio.open(f"ksw.tif", "w", **{**profile, "count": 1, "dtype": "float32"})
+    our_tif = rasterio.open(f"our.tif", "w", **{**profile, "count": 1, "dtype": "float32"})
+    ksw_logit_tif = rasterio.open(
+        f"ksw_logit.tif", "w", **{**profile, "count": 3, "dtype": "float32"}
+    )
+    our_logit_tif = rasterio.open(
+        f"our_logit.tif", "w", **{**profile, "count": 3, "dtype": "float32"}
+    )
     for targets_path in tqdm.tqdm(list(args.kurosiwo_path.glob("**/MK0_MLU_*.tif"))):
         with (targets_path.parent / "info.json").open() as f:
             info = json.load(f)
@@ -149,10 +149,10 @@ def main(args):
         shp = shapely.from_wkt(info["geom"])
         base_out_vit = run_kurosiwo_preprocessed_flood_vit(targets_path.parent, flood_vit)
         _, mine_out_vit = my_kurosiwo.run_flood_vit_once(args.s1_image_paths, shp, flood_vit)
-        base_out_snu = run_kurosiwo_preprocessed_snunet(targets_path.parent, snunet)
-        _, _, mine_out_snu = my_kurosiwo.run_snunet_once(args.s1_image_paths[1:], shp, snunet)
-        base_out = base_out_vit + base_out_snu
-        mine_out = mine_out_vit + mine_out_snu
+        # base_out_snu = run_kurosiwo_preprocessed_snunet(targets_path.parent, snunet)
+        # _, _, mine_out_snu = my_kurosiwo.run_snunet_once(args.s1_image_paths[1:], shp, snunet)
+        base_out = base_out_vit  # + base_out_snu
+        mine_out = mine_out_vit  # + mine_out_snu
         base_i, base_u = compare(onehot(base_out), target_onehot)
         mine_i, mine_u = compare(onehot(mine_out), target_onehot)
 

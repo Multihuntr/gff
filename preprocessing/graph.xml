@@ -10,10 +10,29 @@
             <polyDegree>2</polyDegree>
         </parameters>
     </node>
+    <node id="BorderNoiseRemoved">
+        <operator>Remove-GRD-Border-Noise</operator>
+        <sources>
+            <sourceProduct>OrbitApplied</sourceProduct>
+        </sources>
+        <parameters>
+            <selectedPolarisations>VV,VH</selectedPolarisations>
+        </parameters>
+    </node>
+    <node id="NoThermal">
+        <operator>ThermalNoiseRemoval</operator>
+        <sources>
+            <sourceProduct>BorderNoiseRemoved</sourceProduct>
+        </sources>
+        <parameters>
+            <selectedPolarisations>VV,VH</selectedPolarisations>
+            <removeThermalNoise>true</removeThermalNoise>
+        </parameters>
+    </node>
     <node id="Calibrated">
         <operator>Calibration</operator>
         <sources>
-            <source>OrbitApplied</source>
+            <source>NoThermal</source>
         </sources>
         <parameters>
             <sourceBands>Intensity_VV,Intensity_VH</sourceBands>
@@ -41,7 +60,7 @@
             <demName>SRTM 1Sec HGT</demName>
             <pixelSpacingInMeter>10.0</pixelSpacingInMeter>
             <sourceBands>Sigma0_VV,Sigma0_VH</sourceBands>
-            <mapProjection>EPSG:3857</mapProjection>
+            <!-- <mapProjection>EPSG:3857</mapProjection> -->
         </parameters>
     </node>
 </graph>

@@ -45,6 +45,9 @@ def shapely_bounds_to_rasterio_window(bounds, transform=None):
     if yhi < ylo:
         ylo, yhi = yhi, ylo
 
+    # Rasterio write doesn't use resampling nearest, so floating-point errors will cause off-by-one
+    xlo, ylo, xhi, yhi = round(xlo), round(ylo), round(xhi), round(yhi)
+
     return ((ylo, yhi), (xlo, xhi))
 
 
@@ -106,9 +109,9 @@ def convert_crs(shp: shapely.Geometry, _from: str, _to: str):
     return shapely.ops.transform(project, shp)
 
 
-def convert_affine_inplace(shp, transform: affine.Affine):
-    coords = shapely.get_coordinates(shp)
-    coords_transformed = np.array(transform * coords.T).T
+def convert_affine_inplace(shp, transform: affine.Affine, dtype=np.float64):
+    coords = shapely.get_coordinates(shp).astype(np.float64)
+    coords_transformed = np.array(transform * coords.T, dtype=dtype).T
     shapely.set_coordinates(shp, coords_transformed)
     return shp
 

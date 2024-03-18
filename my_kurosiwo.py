@@ -1,6 +1,7 @@
 import io
 import itertools
 import math
+import os
 from pathlib import Path
 import random
 import subprocess
@@ -143,23 +144,25 @@ def get_dem(shp, name="COP-DEM_GLO-30-DTED__2023_1", shp_crs="EPSG:4326"):
 
 
 def download_s1(img_folder, asf_result, cred_fname=".asf_auth"):
-    zip_fpath = img_folder / asf_result.properties["fileName"]
+    if not isinstance(asf_result, dict):
+        asf_result = asf_result.geojson()
+    zip_fpath = img_folder / asf_result["properties"]["fileName"]
     if not (zip_fpath.exists()):
+        print("Downloading S1 image: ", zip_fpath)
         with open(cred_fname) as f:
             username, password = f.read().strip().split(";")
         session = asf.ASFSession().auth_with_creds(username, password)
-        asf_result.download(path=img_folder, session=session)
+        url = asf_result["properties"]["url"]
+        asf.download_url(url, path=img_folder, session=session)
+    return zip_fpath
 
 
-def preprocess(
-    img_folder: Path, s1_fname: Path, out_fname: Path, wkt: str = None, reprocess: bool = False
-):
+def preprocess(img_folder: Path, s1_fname: Path, out_fname: Path):
     assert (img_folder / s1_fname).exists(), "Sentinel 1 file not downloaded"
-    if (img_folder / out_fname).exists():
+    if (img_folder / "tmp" / out_fname).exists():
         return
-    if reprocess:
-        tmp_str = "".join(random.choice("0123456789ABCDEF") for n in range(6))
-        tmp_fname = f"{tmp_str}.tif"
+    tmp_folder = Path("tmp")
+    (img_folder / tmp_folder).mkdir(exist_ok=True)
     args = [
         "docker",
         "run",
@@ -172,41 +175,15 @@ def preprocess(
         "-v",
         f"{str(img_folder)}:/data",
         "esa-snappy",
-        "gpt",
-        "graph.xml",
+        "bash",
         "-c",
-        "12G",
-        f"-Ssource=/data/{s1_fname}",
-        "-t",
-        f"/data/{tmp_fname}",
+        f"gpt graph.xml -c 12G -Ssource=/data/{s1_fname} -t /data/tmp/{out_fname} && chown -R {os.getuid()} /data/tmp",
     ]
-    if wkt is not None:
-        args.append("--aoi_wkt")
-        args.append(wkt)
-    process_result = subprocess.run(args, capture_output=True)
+    print(f"Preprocessing {img_folder / s1_fname} to {img_folder}/{tmp_folder}/{out_fname}")
+    process_result = subprocess.run(args)
 
-    if not (img_folder / tmp_fname).exists():
+    if not (img_folder / tmp_folder / out_fname).exists():
         raise Exception("Docker run failed for some reason.")
-
-    if reprocess:
-        # Rewrite with rasterio; esp. compress/tile
-        in_tif = rasterio.open(img_folder / tmp_fname)
-        new_profile = {
-            **in_tif.profile,
-            "count": 2,
-            "compress": "packbits",
-            "nodata": np.nan,  # TODO: check
-            "blockxsize": constants.FLOODMAP_BLOCK_SIZE,
-            "blockysize": constants.FLOODMAP_BLOCK_SIZE,
-            "tiled": True,
-            "descriptions": ["vv", "vh"],
-            "bigtiff": "YES",
-        }
-
-        with rasterio.open(img_folder / out_fname, "w", **new_profile) as out_tif:
-            for (y, x), window in tqdm.tqdm(out_tif.block_windows(1)):
-                data_block = in_tif.read(window=window)
-                out_tif.write(data_block, window=window)
 
 
 def run_snunet_once(

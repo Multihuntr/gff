@@ -13,3 +13,4 @@ FLOODMAP_PROFILE_DEFAULTS = {
     "count": 1,
     "dtype": np.uint8,
 }
+WORLDCOVER_PW_CLASS = 80

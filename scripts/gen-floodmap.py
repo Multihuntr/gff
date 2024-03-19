@@ -2,6 +2,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+import warnings
 
 import geopandas
 import torch
@@ -61,7 +62,9 @@ def main(args):
 
     # Get basin row
     gpkg_path = args.data_folder / "basin_floods.gpkg"
-    basin_floods = geopandas.read_file(gpkg_path, engine="pyogrio", where="BEGAN >= '2014-01-01'")
+    cond = "BEGAN >= '2014-01-01'"
+    with warnings.catch_warnings(action="ignore"):
+        basin_floods = geopandas.read_file(gpkg_path, engine="pyogrio", where=cond)
     is_flood = basin_floods["ID"] == args.flood_id
     is_hybas = basin_floods["HYBAS_ID"] == args.hybas_id
     basin_row = basin_floods.loc[is_flood & is_hybas].iloc[0]

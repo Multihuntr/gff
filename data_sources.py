@@ -107,16 +107,7 @@ def get_srtm_dem_file(north: int, east: int):
     return final_fpath
 
 
-def get_dem_file(north: int, east: int, name: str = "COP-DEM_GLO-30-DTED__2023_1"):
-    if "COP-DEM" in name:
-        return get_cop_dem_file(north, east, name)
-    elif name == "SRTM 3Sec":
-        return get_srtm_dem_file(north, east)
-    else:
-        raise ValueError(f"Unknown DEM: '{name}'")
-
-
-def get_world_cover_file(north, east, folder):
+def get_world_cover_file(north: int, east: int, folder: Path):
     base_url = "https://esa-worldcover.s3.eu-central-1.amazonaws.com"
     year = 2021
     ver = "v200"
@@ -130,19 +121,20 @@ def get_world_cover_file(north, east, folder):
 
     url = f"{base_url}/{ver}/{year}/map/{fname}"
     bin_data = download_url(url)
+    folder.mkdir(exist_ok=True)
     with open(fpath, "wb") as f:
         f.write(bin_data)
     return fpath
 
 
-def get_1x1_product(shp, shp_crs, folder, getter, **kwargs):
+def get_nbyn_product(shp, shp_crs, folder, getter, n=1, **kwargs):
     """
-    Get a product gridded at 1x1 degrees
-    with a minimal bounding box around it.
+    Get a product tiled with n-by-n degree squares.
 
     Saves downloaded product to folder.
 
-    Returns xarray in minimal bounding box around shp
+    Returns (computed) xarray in minimal bounding box around shp.
+    Automatically handles the case that shp goes over multiple product tile boundaries
     """
     if shp_crs != "EPSG:4326":
         util.convert_crs(shp, shp_crs, "EPSG:4326")
@@ -150,21 +142,26 @@ def get_1x1_product(shp, shp_crs, folder, getter, **kwargs):
         shp4326 = shp
 
     xlo, ylo, xhi, yhi = shp4326.bounds
-    ew_ran = range(math.floor(xlo), math.ceil(xhi))
-    ns_ran = range(math.floor(ylo), math.ceil(yhi))
-    dem_paths = [getter(ns, ew, folder, **kwargs) for ew, ns in itertools.product(ew_ran, ns_ran)]
-    dem = xarray.open_mfdataset(dem_paths)
+    ew_ran = range(math.floor(xlo / n) * n, math.ceil(xhi / n) * n, n)
+    ns_ran = range(math.floor(ylo / n) * n, math.ceil(yhi / n) * n, n)
+    paths = [getter(ns, ew, folder, **kwargs) for ew, ns in itertools.product(ew_ran, ns_ran)]
+    dem = xarray.open_mfdataset(paths)
     box = dem.sel(x=slice(xlo, xhi), y=slice(yhi, ylo))
 
     return box.compute()
 
 
 def get_world_cover(shp, shp_crs, folder):
-    return get_1x1_product(shp, shp_crs, folder, get_world_cover_file)
+    return get_nbyn_product(shp, shp_crs, folder, get_world_cover_file, n=3)
 
 
 def get_dem(shp, shp_crs, folder, name="COP-DEM_GLO-30-DTED__2023_1"):
-    return get_1x1_product(shp, shp_crs, folder, get_dem_file, name=name)
+    if "COP-DEM" in name:
+        return get_nbyn_product(shp, shp_crs, folder, get_cop_dem_file, n=1, name=name)
+    elif name == "SRTM 3Sec":
+        return get_nbyn_product(shp, shp_crs, folder, get_srtm_dem_file, n=5, name=name)
+    else:
+        raise ValueError(f"Unknown DEM: '{name}'")
 
 
 def download_s1(img_folder, asf_result, cred_fname=".asf_auth"):

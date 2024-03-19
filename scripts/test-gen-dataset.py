@@ -42,7 +42,6 @@ def main(args):
         dataset_generation.progressively_grow_floodmaps(
             args.s1_img_paths,
             rivers,
-            args.geom,
             args.out_path,
             run_flood_model,
             include_s1=True,

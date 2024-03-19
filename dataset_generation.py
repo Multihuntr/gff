@@ -5,6 +5,8 @@ import math
 from pathlib import Path
 import shutil
 import subprocess
+from typing import Union
+import warnings
 
 import affine
 import geopandas
@@ -126,14 +128,13 @@ def create_flood_maps(
             res_date = datetime.datetime.fromisoformat(res[0]["properties"]["startTime"])
             date_strs.append(res_date.strftime("%Y-%m-%d"))
 
-        print(f"Searching using S1 from   {'  '.join(date_strs)}")
+        print(f"Searching  {cross_term}  using S1 from   {'  '.join(date_strs)}")
 
         filename = f"{cross_term}-{'-'.join(date_strs)}.tif"
         floodmap_path = data_folder / "floodmaps" / filename
         visit_tiles, flood_tiles, s1_export_paths = progressively_grow_floodmaps(
             s1_img_paths,
             rivers_df,
-            basin_row.geometry,
             floodmap_path,
             flood_model,
             export_s1=export_s1,
@@ -163,7 +164,7 @@ def create_flood_maps(
                 meta["s1"] = [str(p) for p in s1_export_paths]
 
             if export_s1:
-                for s1_export_path in s1_export_paths:
+                for i, s1_export_path in enumerate(s1_export_paths):
                     with rasterio.open(s1_export_path, "r+") as s1_tif:
                         desc_keys = ["flightDirection", "pathNumber", "startTime", "orbit"]
                         props = search_results[search_idx[i]][0]["properties"]
@@ -182,9 +183,8 @@ def create_flood_maps(
 def progressively_grow_floodmaps(
     inp_img_paths: list[Path],
     rivers_df: geopandas.GeoDataFrame,
-    geom: shapely.Geometry,
     floodmap_path: Path,
-    flood_model: torch.nn.Module,
+    flood_model: Union[torch.nn.Module, callable],
     tile_size: int = 224,
     export_s1: bool = False,
     print_freq: int = 0,
@@ -193,10 +193,7 @@ def progressively_grow_floodmaps(
     First run flood_model along riverway from geom, then expand the search as flooded areas are found.
     Stores all visited tiles to floodmap_path.
 
-    Conditions:
-     - all tifs in inp_img_paths must match resolution and CRS.
-     - geom must be in CRS of tifs
-
+    Note: all tifs in inp_img_paths must match resolution and CRS.
     Thus the output is in the same CRS.
 
     The output will be aligned pixel-wise with the last input image, and the other inputs will
@@ -210,9 +207,17 @@ def progressively_grow_floodmaps(
     # Create tile_grid and initial set of tiles
     viable_footprint = shapely.intersection_all([util.image_footprint(tif) for tif in inp_tifs])
     tile_grids, viable_footprint = mk_grid(viable_footprint, ref_tif.transform, tile_size)
-    tiles = tiles_along_river_within_geom(rivers_df, geom, tile_grids[(0, 0)], ref_tif.crs)
-    visited = np.zeros_like(tile_grids[(0, 0)]).astype(bool)
+    tiles = tiles_along_river_within_geom(
+        rivers_df, viable_footprint, tile_grids[(0, 0)], ref_tif.crs
+    )
     grid_size = tile_grids[(0, 0)].shape
+    # Expand a small area around the river tiles
+    for tile_x, tile_y in tiles.copy():
+        new_tiles = sel_new_tiles_big_window(tile_x, tile_y, *grid_size, add=3)
+        for tile in new_tiles:
+            if tile not in tiles:
+                tiles.append(tile)
+    visited = np.zeros_like(tile_grids[(0, 0)]).astype(bool)
     offset_cache = {(0, 1): {}, (1, 0): {}, (1, 1): {}}
     if len(tiles) == 0:
         raise Exception("Provided geometry does not intersect any rivers")
@@ -243,7 +248,7 @@ def progressively_grow_floodmaps(
             "height": tile_grids[0, 0].shape[1] * tile_size,
         }
         names = constants.KUROSIWO_S1_NAMES[-(len(inp_img_paths)) :]
-        s1_folder = floodmap_path.parent / "s1_export"
+        s1_folder = floodmap_path.parent / "s1-export"
         s1_folder.mkdir(exist_ok=True)
         s1_fpaths = [s1_folder / f"{floodmap_path.stem}_{n}.tif" for n in names]
         s1_tifs = [rasterio.open(p, "w", **s1_profile) for p in s1_fpaths]
@@ -311,7 +316,7 @@ def progressively_grow_floodmaps(
     for tif in inp_tifs:
         tif.close()
 
-    postprocess(floodmap_path, floodmap_nodata=floodmap_nodata)
+    postprocess(floodmap_path, visit_tiles, nodata=floodmap_nodata)
     return visit_tiles, flood_tiles, s1_fpaths
 
 
@@ -541,7 +546,7 @@ def s1_preprocess_edge_heuristic(tensors, threshold=0.05):
     return np.all([(t < 1e-5).sum() < (t.size * threshold) for t in tensors])
 
 
-def check_flooded(tile, threshold=0.03):
+def check_flooded(tile, threshold=0.05):
     return (tile == constants.KUROSIWO_FLOOD_CLASS).mean() > threshold
 
 
@@ -556,11 +561,13 @@ def sel_new_tiles_big_window(tile_x, tile_y, xsize, ysize, add=3):
 def load_rivers(hydroatlas_path: Path, threshold: int = 20000):
     river_path = hydroatlas_path / "filtered_rivers.gpkg"
     if river_path.exists():
-        return geopandas.read_file(river_path, engine="pyogrio")
+        with warnings.catch_warnings(action="ignore"):
+            return geopandas.read_file(river_path, engine="pyogrio")
 
     rivers = []
     for raw_path in hydroatlas_path.glob("**/RiverATLAS_v10_*.shp"):
-        r = geopandas.read_file(raw_path, engine="pyogrio", where=f"riv_tc_usu > {threshold}")
+        with warnings.catch_warnings(action="ignore"):
+            r = geopandas.read_file(raw_path, engine="pyogrio", where=f"riv_tc_usu > {threshold}")
         rivers.append(r)
     rivers_df = geopandas.GeoDataFrame(pd.concat(rivers, ignore_index=True), crs=rivers[0].crs)
     rivers_df.to_file(river_path, engine="pyogrio")
@@ -578,7 +585,7 @@ def run_snunet_once(
 
     geom_4326 = util.convert_crs(geom, geom_crs, "EPSG:4326")
     dem_coarse = data_sources.get_dem(geom_4326, shp_crs="EPSG:4326", folder=Path("preprocessing"))
-    dem_fine = util.resample(dem_coarse, geom_4326.bounds, inps[0].shape[2:])
+    dem_fine = util.resample_xr(dem_coarse, geom_4326.bounds, inps[0].shape[2:])
     dem_th = dem_fine.band_data.values
     out = model(inps, dem=dem_th)[0].cpu().numpy()
     return inps, dem_th, out
@@ -606,14 +613,19 @@ def vit_decoder_runner():
     return run_flood_model
 
 
-def postprocess(fpath, floodmap_nodata, **kwargs):
-    # Finally postprocess to clean up the edges
+def postprocess(fpath, tiles, nodata, **kwargs):
+    """Clean up the edges + paste worldcover permanent water class"""
     with rasterio.open(fpath) as out_tif:
         floodmaps = out_tif.read()
         profile = out_tif.profile
-    nan_mask = floodmaps == floodmap_nodata
+
+    nan_mask = floodmaps == nodata
+
     floodmaps = postprocess_classes(floodmaps[0], mask=(~nan_mask)[0], **kwargs)[None]
-    floodmaps[nan_mask] = floodmap_nodata
+    folder = fpath.parent / "worldcover-cache"
+    postprocess_world_cover(floodmaps, tiles, profile["transform"], profile["crs"], folder)
+
+    floodmaps[nan_mask] = nodata
     with rasterio.open(fpath.with_stem(fpath.stem + "-post"), "w", **profile) as out_tif:
         out_tif.write(floodmaps)
 
@@ -654,3 +666,18 @@ def postprocess_classes(class_map, mask=None, size_threshold=50):
                     smoothed[slices][shp_mask] = majority
 
     return smoothed
+
+
+def postprocess_world_cover(floodmaps, tiles, transform, crs, folder):
+    for tile in tiles:
+        # Get pixel bounds
+        (ylo, yhi), (xlo, xhi) = util.shapely_bounds_to_rasterio_window(tile.bounds, transform)
+
+        # Load worldcover
+        cover = data_sources.get_world_cover(tile, crs, folder)
+        cover_res = util.resample_xr(cover, tile.bounds, ((yhi - ylo), (xhi - xlo)))
+
+        # Apply permanent water class
+        cover_np = cover_res.band_data.values.astype(np.uint8)
+        permanent_water_mask = cover_np == constants.WORLDCOVER_PW_CLASS
+        floodmaps[:, ylo:yhi, xlo:xhi][permanent_water_mask] = constants.KUROSIWO_PW_CLASS

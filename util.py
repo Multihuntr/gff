@@ -119,11 +119,16 @@ def convert_affine_inplace(shp, transform: affine.Affine, dtype=np.float64):
 # Raster geometry utilities
 
 
-def resample(arr: xarray.Dataset, bounds: tuple[int, int, int, int], size: tuple[int, int]):
+def resample_xr(
+    arr: xarray.Dataset,
+    bounds: tuple[int, int, int, int],
+    size: tuple[int, int],
+    method: str = "nearest",
+):
     xlo, ylo, xhi, yhi = bounds
     xs = np.linspace(xlo, xhi, size[1])
     ys = np.linspace(yhi, ylo, size[0])
-    return arr.interp(x=xs, y=ys, method="linear", kwargs={"fill_value": "extrapolate"})
+    return arr.interp(x=xs, y=ys, method=method, kwargs={"fill_value": "extrapolate"})
 
 
 def get_tile(

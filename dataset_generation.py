@@ -31,27 +31,27 @@ def check_tifs_match(tifs):
     assert all([tif.crs == tifs[0].crs for tif in tifs[1:]]), "Not all tifs have the same CRS"
 
 
-def ensure_s1(img_folder, prefix, results, delete_intermediate=False):
+def ensure_s1(data_folder, prefix, results, delete_intermediate=False):
     d = datetime.datetime.fromisoformat(results[0]["properties"]["startTime"])
     d_str = d.strftime("%Y-%m-%d")
     filename = f"{prefix}-{d_str}.tif"
-    out_fpath = img_folder / filename
+    out_fpath = data_folder / filename
     if out_fpath.exists():
         return out_fpath
 
     zip_fpaths, processed_fpaths = [], []
     for result in results:
         # Download image
-        zip_fpath = data_sources.download_s1(img_folder, result)
+        zip_fpath = data_sources.download_s1(data_folder, result)
         zip_fpaths.append(zip_fpath)
 
         # Run preprocessing on whole image
         dim_fname = Path(zip_fpath.with_name(zip_fpath.stem + "-processed.dim").name)
-        data_sources.preprocess_s1(img_folder, zip_fpath.name, dim_fname)
+        data_sources.preprocess_s1(data_folder, zip_fpath.name, dim_fname)
         # DIMAP is a weird format. You ask it to save at ".dim" and it actually saves elsewhere
         # Anyway, need to combine the vv and vh bands into a single file for later merge
-        data_path = img_folder / "tmp" / dim_fname.with_suffix(".data")
-        processed_fpath = img_folder / dim_fname.with_suffix(".tif")
+        data_path = data_folder / "tmp" / dim_fname.with_suffix(".data")
+        processed_fpath = data_folder / dim_fname.with_suffix(".tif")
         processed_fpaths.append(processed_fpath)
         if not processed_fpath.exists():
             print("Merging DIMAP to a single TIF.")
@@ -84,7 +84,7 @@ def ensure_s1(img_folder, prefix, results, delete_intermediate=False):
 
 
 def create_flood_maps(
-    img_folder, search_results, basin_shp, rivers_df, flood_model, include_s1=True, n_img=3
+    data_folder, search_results, basin_row, rivers_df, flood_model, export_s1=True, n_img=3
 ):
     """
     Creates flood maps for a single basin x flood shape by starting along rivers
@@ -97,30 +97,20 @@ def create_flood_maps(
 
     This will stop when flooding is found, or we run out of sentinel images.
     """
-    cross_term = f"{basin_shp.ID}-{basin_shp.HYBAS_ID}"
+    cross_term = f"{basin_row.ID}-{basin_row.HYBAS_ID}"
 
-    # Should go through all viable sets. What is a viable set?
-    # Let's assume we have a sequence of S1 images: [-3, -2, -1, 0, 1, 2, 3, 4]
-    # Where 0 is the first time a S1 image has been taken after a flood BEGAN.
+    # Who knows? *shrug*
+    # Pick the first one
 
-    # We start with [-2, -1, 0]
-    # Run progressively_grow_floodmaps on that set, and then
-    # If there is significant flooding, the next set is: [-3, -2, 0]
-    # If there is not, the next set is: [-1, 0, 1]
-
-    # If we go from significant flooding to not-significant flooding, then we are done.
-    # Flood over.
-
-    start_ts = basin_shp["BEGAN"].to_pydatetime().timestamp()
+    start_ts = basin_row["BEGAN"].to_pydatetime().timestamp()
     first_after = None
     for i, result in enumerate(search_results):
         ts = datetime.datetime.fromisoformat(result[0]["properties"]["startTime"]).timestamp()
         if ts >= start_ts:
             first_after = i
             break
+    # mid = (len(search_results) + first_after) // 2
     open_set = [[first_after - 2, first_after - 1, first_after]]
-    found_flooding = False
-    flood_metas = []
 
     while len(open_set) > 0:
         search_idx = open_set.pop(0)
@@ -130,7 +120,7 @@ def create_flood_maps(
         for i in search_idx:
             res = search_results[i]
             # Get image
-            img_path = ensure_s1(img_folder / "s1", cross_term, res, delete_intermediate=True)
+            img_path = ensure_s1(data_folder / "s1", cross_term, res, delete_intermediate=True)
             s1_img_paths.append(img_path)
             # Get image date
             res_date = datetime.datetime.fromisoformat(res[0]["properties"]["startTime"])
@@ -139,14 +129,14 @@ def create_flood_maps(
         print(f"Searching using S1 from   {'  '.join(date_strs)}")
 
         filename = f"{cross_term}-{'-'.join(date_strs)}.tif"
-        floodmap_path = img_folder / "floodmaps" / filename
-        visit_tiles, flood_tiles, s1_export = progressively_grow_floodmaps(
+        floodmap_path = data_folder / "floodmaps" / filename
+        visit_tiles, flood_tiles, s1_export_paths = progressively_grow_floodmaps(
             s1_img_paths,
             rivers_df,
-            basin_shp.geometry,
+            basin_row.geometry,
             floodmap_path,
             flood_model,
-            include_s1=include_s1,
+            export_s1=export_s1,
             print_freq=200,
         )
 
@@ -154,43 +144,39 @@ def create_flood_maps(
             print(" No major flooding found.")
             # floodmap_path.unlink()
             # s1_export.unlink()
-            if found_flooding:
-                print(" Since previous flooding was found, we're done")
-                break
+            new_search_idx = [idx + 1 for idx in search_idx]
             if all([i >= 0 and i < len(search_results) for i in new_search_idx]):
-                open_set.append([idx + 1 for idx in search_idx])
+                open_set.append(new_search_idx)
         else:
             print(" Major flooding found.")
             meta = {
-                "FLOOD": f"{basin_shp.ID}",
-                "HYBAS_ID": f"{basin_shp.HYBAS_ID}",
+                "FLOOD": f"{basin_row.ID}",
+                "HYBAS_ID": f"{basin_row.HYBAS_ID}",
                 "pre2_date": search_results[search_idx[0]][0]["properties"]["startTime"],
                 "pre1_date": search_results[search_idx[1]][0]["properties"]["startTime"],
                 "post_date": search_results[search_idx[2]][0]["properties"]["startTime"],
-                "s1": str(s1_export),
                 "floodmap": str(floodmap_path),
-                "visit_tiles": visit_tiles,
-                "flood_tiles": flood_tiles,
+                "visit_tiles": [shapely.get_coordinates(t).tolist() for t in visit_tiles],
+                "flood_tiles": [shapely.get_coordinates(t).tolist() for t in flood_tiles],
             }
-            flood_metas.append(meta)
-            found_flooding = True
+            if export_s1:
+                meta["s1"] = [str(p) for p in s1_export_paths]
 
-            if include_s1:
-                with rasterio.open(s1_export, "r+") as s1_tif:
-                    desc = []
-                    for i, img in enumerate(["pre2", "pre1", "post"][-n_img:]):
-                        for pol in ["vv", "vh"]:
-                            desc.append(f"{img}-{pol}")
+            if export_s1:
+                for s1_export_path in s1_export_paths:
+                    with rasterio.open(s1_export_path, "r+") as s1_tif:
                         desc_keys = ["flightDirection", "pathNumber", "startTime", "orbit"]
-                        desc_dict = {
-                            k: search_results[search_idx[i]][0]["properties"][k] for k in desc_keys
-                        }
-                        s1_tif.update_tags(2 * i + 1, **desc_dict, polarisation="vv")
-                        s1_tif.update_tags(2 * i + 2, **desc_dict, polarisation="vh")
-                    s1_tif.descriptions = desc
-            new_search_idx = [*[i - 1 for i in search_idx[:-1]], search_idx[-1]]
-            if all([i >= 0 and i < len(search_results) for i in new_search_idx]):
-                open_set.append(new_search_idx)
+                        props = search_results[search_idx[i]][0]["properties"]
+                        desc_dict = {k: props[k] for k in desc_keys}
+                        s1_tif.update_tags(1, **desc_dict, polarisation="vv")
+                        s1_tif.update_tags(2, **desc_dict, polarisation="vh")
+                        s1_tif.descriptions = ["vv", "vh"]
+            # new_search_idx = [*[i - 1 for i in search_idx[:-1]], search_idx[-1]]
+            # if all([i >= 0 and i < len(search_results) for i in new_search_idx]):
+            #     open_set.append(new_search_idx)
+            return meta
+    print("No viable floods detected.")
+    return None
 
 
 def progressively_grow_floodmaps(
@@ -200,7 +186,7 @@ def progressively_grow_floodmaps(
     floodmap_path: Path,
     flood_model: torch.nn.Module,
     tile_size: int = 224,
-    include_s1: bool = False,
+    export_s1: bool = False,
     print_freq: int = 0,
 ):
     """
@@ -244,22 +230,23 @@ def progressively_grow_floodmaps(
         "width": tile_grids[0, 0].shape[0] * tile_size,
         "height": tile_grids[0, 0].shape[1] * tile_size,
     }
-    s1_tif = None
-    s1_fpath = None
-    if include_s1:
-        s1_count = len(inp_img_paths) * ref_tif.profile["count"]
+    s1_fpaths = None
+    s1_tifs = None
+    if export_s1:
         s1_profile = {
             **ref_tif.profile,
             "COMPRESS": "DEFLATE",
             "ZLEVEL": 1,
             "PREDICTOR": 2,
-            "count": s1_count,
             "transform": new_transform,
             "width": tile_grids[0, 0].shape[0] * tile_size,
             "height": tile_grids[0, 0].shape[1] * tile_size,
         }
-        s1_fpath = floodmap_path.with_stem(f"{floodmap_path.stem}_s1")
-        s1_tif = rasterio.open(s1_fpath, "w", **s1_profile)
+        names = constants.KUROSIWO_S1_NAMES[-(len(inp_img_paths)) :]
+        s1_folder = floodmap_path.parent / "s1_export"
+        s1_folder.mkdir(exist_ok=True)
+        s1_fpaths = [s1_folder / f"{floodmap_path.stem}_{n}.tif" for n in names]
+        s1_tifs = [rasterio.open(p, "w", **s1_profile) for p in s1_fpaths]
 
     # Begin flood-fill search
     visit_tiles, flood_tiles = [], []
@@ -290,8 +277,9 @@ def progressively_grow_floodmaps(
             # Write classes to disk
             flood_cls = flood_logits.argmax(axis=0)[None].astype(np.uint8)
             window = util.shapely_bounds_to_rasterio_window(tile_geom.bounds, out_tif.transform)
-            if include_s1:
-                s1_tif.write(np.concatenate([t for t in s1_inps]), window=window)
+            if export_s1:
+                for s1_tif, s1_inp_tile in zip(s1_tifs, s1_inps):
+                    s1_tif.write(s1_inp_tile, window=window)
             out_tif.write(flood_cls, window=window)
 
             # Select new potential tiles (if not visited)
@@ -317,20 +305,14 @@ def progressively_grow_floodmaps(
                     f"{n_permanent:6d} in large bodies of water",
                     f"{n_outside:6d} outside legal bounds",
                 )
-    if include_s1:
-        s1_tif.close()
+    if export_s1:
+        for s1_tif in s1_tifs:
+            s1_tif.close()
     for tif in inp_tifs:
         tif.close()
 
-    # Finally postprocess to clean up the edges
-    with rasterio.open(floodmap_path) as out_tif:
-        floodmaps = out_tif.read()
-    nan_mask = floodmaps == floodmap_nodata
-    floodmaps = postprocess_classes(floodmaps[0], mask=(~nan_mask)[0])[None]
-    floodmaps[nan_mask] = floodmap_nodata
-    with rasterio.open(floodmap_path, "w", **profile) as out_tif:
-        out_tif.write(floodmaps)
-    return visit_tiles, flood_tiles, s1_fpath
+    postprocess(floodmap_path, floodmap_nodata=floodmap_nodata)
+    return visit_tiles, flood_tiles, s1_fpaths
 
 
 def major_upstream_riverways(basins_df, start, bounds, threshold=20000):
@@ -616,6 +598,24 @@ def run_flood_vit_batched(
     inps = util.get_tiles_batched(imgs, geoms, geoms_in_px)
     out = model(inps).cpu().numpy()
     return inps, out
+
+
+def vit_decoder_runner():
+    flood_model = torch.hub.load("Multihuntr/KuroSiwo", "vit_decoder", pretrained=True).cuda()
+    run_flood_model = lambda tifs, geom: run_flood_vit_once(tifs, geom, flood_model)
+    return run_flood_model
+
+
+def postprocess(fpath, floodmap_nodata, **kwargs):
+    # Finally postprocess to clean up the edges
+    with rasterio.open(fpath) as out_tif:
+        floodmaps = out_tif.read()
+        profile = out_tif.profile
+    nan_mask = floodmaps == floodmap_nodata
+    floodmaps = postprocess_classes(floodmaps[0], mask=(~nan_mask)[0], **kwargs)[None]
+    floodmaps[nan_mask] = floodmap_nodata
+    with rasterio.open(fpath.with_stem(fpath.stem + "-post"), "w", **profile) as out_tif:
+        out_tif.write(floodmaps)
 
 
 def postprocess_classes(class_map, mask=None, size_threshold=50):

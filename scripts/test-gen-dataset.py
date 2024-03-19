@@ -35,9 +35,7 @@ def parse_args(argv):
 
 def main(args):
     torch.set_grad_enabled(False)
-    flood_model = torch.hub.load("Multihuntr/KuroSiwo", "vit_decoder", pretrained=True).cuda()
-    runner = dataset_generation.run_flood_vit_once
-    run_flood_model = lambda tifs, geom: runner(tifs, geom, flood_model)
+    run_flood_model = dataset_generation.vit_decoder_runner()
     rivers = dataset_generation.load_rivers(args.hydroatlas_path)
 
     if not args.full:

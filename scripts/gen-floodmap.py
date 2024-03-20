@@ -17,7 +17,7 @@ def parse_args(argv):
     parser.add_argument("hydroatlas_path", type=Path)
     parser.add_argument("flood_id", type=int)
     parser.add_argument("hybas_id", type=int)
-    parser.add_argument("export_s1", action="store_true", help="export S1 alongside floodmaps")
+    parser.add_argument("--export_s1", action="store_true", help="export S1 alongside floodmaps")
     # parser.add_argument("hub_url", type=str, help="torch.hub url of flood mapping model")
     # parser.add_argument("model_name", type=str, help="torch.hub model name at url")
 

@@ -75,13 +75,13 @@ def get_cop_dem_file(north: int, east: int, name: str, folder: Path):
     return final_fpath
 
 
-def get_srtm_dem_file(north: int, east: int):
+def get_srtm_dem_file(north: int, east: int, folder: Path):
     # SRTM is in 5x5 degree rectangles, lat in [60, -60], long in [-180, 180]
     n = (90 - (north + 30)) // 5 + 1
     e = (east + 180) // 5 + 1
     tile_name = f"srtm_{e:02d}_{n:02d}"
     # Check already downloaded
-    final_fpath = Path("preprocessing") / "dem" / "SRTM 3Sec" / f"{tile_name}.tif"
+    final_fpath = folder / "dem" / "SRTM 3Sec" / f"{tile_name}.tif"
     if final_fpath.exists():
         return final_fpath
     print(f"Downloading {tile_name}.tif to {final_fpath}")
@@ -178,7 +178,8 @@ def download_s1(img_folder, asf_result, cred_fname=".asf_auth"):
     return zip_fpath
 
 
-def preprocess_s1(img_folder: Path, s1_fname: Path, out_fname: Path):
+def preprocess_s1(data_folder: Path, s1_fname: Path, out_fname: Path):
+    img_folder = data_folder / "s1"
     assert (img_folder / s1_fname).exists(), "Sentinel 1 file not downloaded"
     if (img_folder / "tmp" / out_fname).exists():
         return
@@ -190,15 +191,17 @@ def preprocess_s1(img_folder: Path, s1_fname: Path, out_fname: Path):
         "--rm",
         "-it",
         "-v",
-        f"{str(Path.cwd())}/preprocessing/dem:/root/.snap/auxdata/dem",
+        f"{str(data_folder)}/dem:/root/.snap/auxdata/dem",
         "-v",
-        f"{str(Path.cwd())}/preprocessing/Orbits:/root/.snap/auxdata/Orbits",
+        f"{str(data_folder)}/Orbits:/root/.snap/auxdata/Orbits",
         "-v",
         f"{str(img_folder)}:/data",
         "esa-snappy",
         "bash",
         "-c",
-        f"gpt graph.xml -c 12G -Ssource=/data/{s1_fname} -t /data/tmp/{out_fname} && chown -R {os.getuid()} /data/tmp",
+        f"gpt graph.xml -c 12G -Ssource=/data/{s1_fname} -t /data/tmp/{out_fname} "
+        f"&& chown -R {os.getuid()} /data/tmp/{out_fname}"
+        f"&& chown -R {os.getuid()} /data/tmp/{out_fname.with_suffix('.data')}",
     ]
     print(f"Preprocessing {img_folder / s1_fname} to {img_folder}/{tmp_folder}/{out_fname}")
     process_result = subprocess.run(args)

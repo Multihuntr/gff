@@ -34,17 +34,18 @@ def check_tifs_match(tifs):
 
 
 def ensure_s1(data_folder, prefix, results, delete_intermediate=False):
+    img_folder = data_folder / "s1"
     d = datetime.datetime.fromisoformat(results[0]["properties"]["startTime"])
     d_str = d.strftime("%Y-%m-%d")
     filename = f"{prefix}-{d_str}.tif"
-    out_fpath = data_folder / filename
+    out_fpath = img_folder / filename
     if out_fpath.exists():
         return out_fpath
 
     zip_fpaths, processed_fpaths = [], []
     for result in results:
         # Download image
-        zip_fpath = data_sources.download_s1(data_folder, result)
+        zip_fpath = data_sources.download_s1(img_folder, result)
         zip_fpaths.append(zip_fpath)
 
         # Run preprocessing on whole image
@@ -52,8 +53,8 @@ def ensure_s1(data_folder, prefix, results, delete_intermediate=False):
         data_sources.preprocess_s1(data_folder, zip_fpath.name, dim_fname)
         # DIMAP is a weird format. You ask it to save at ".dim" and it actually saves elsewhere
         # Anyway, need to combine the vv and vh bands into a single file for later merge
-        data_path = data_folder / "tmp" / dim_fname.with_suffix(".data")
-        processed_fpath = data_folder / dim_fname.with_suffix(".tif")
+        data_path = img_folder / "tmp" / dim_fname.with_suffix(".data")
+        processed_fpath = img_folder / dim_fname.with_suffix(".tif")
         processed_fpaths.append(processed_fpath)
         if not processed_fpath.exists():
             print("Merging DIMAP to a single TIF.")
@@ -122,7 +123,7 @@ def create_flood_maps(
         for i in search_idx:
             res = search_results[i]
             # Get image
-            img_path = ensure_s1(data_folder / "s1", cross_term, res, delete_intermediate=True)
+            img_path = ensure_s1(data_folder, cross_term, res, delete_intermediate=True)
             s1_img_paths.append(img_path)
             # Get image date
             res_date = datetime.datetime.fromisoformat(res[0]["properties"]["startTime"])
@@ -234,7 +235,7 @@ def progressively_grow_floodmaps(
         "transform": new_transform,
         "width": tile_grids[0, 0].shape[0] * tile_size,
         "height": tile_grids[0, 0].shape[1] * tile_size,
-        "bigtiff": "IF_NEEDED",
+        "BIGTIFF": "IF_NEEDED",
     }
     s1_fpaths = None
     s1_tifs = None
@@ -247,7 +248,7 @@ def progressively_grow_floodmaps(
             "transform": new_transform,
             "width": tile_grids[0, 0].shape[0] * tile_size,
             "height": tile_grids[0, 0].shape[1] * tile_size,
-            "bigtiff": "IF_NEEDED",
+            "BIGTIFF": "IF_NEEDED",
         }
         names = constants.KUROSIWO_S1_NAMES[-(len(inp_img_paths)) :]
         s1_folder = floodmap_path.parent / "s1-export"

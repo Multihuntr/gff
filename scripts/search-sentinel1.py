@@ -112,6 +112,9 @@ def main(args):
         k = f"{shp.ID}-{shp.HYBAS_ID}"
         results = index[k]["results"]
 
+        # Remove HH+HV results
+        results = [r for r in results if r["properties"]["polarization"] == "VV+VH"]
+
         # Group by ascending/descending
         ascending = [r for r in results if r["properties"]["flightDirection"] == "ASCENDING"]
         descending = [r for r in results if r["properties"]["flightDirection"] == "DESCENDING"]
@@ -131,9 +134,9 @@ def main(args):
         if len(descending) >= n_required:
             ndd += 1
 
-        # Ensure that, within each group, the whole basin is covered
-        ascending = [g for g in ascending if group_covers_geom(g, shp.geometry, basin_prop)]
-        descending = [g for g in descending if group_covers_geom(g, shp.geometry, basin_prop)]
+        # # Ensure that, within each group, the whole basin is covered
+        # ascending = [g for g in ascending if group_covers_geom(g, shp.geometry, basin_prop)]
+        # descending = [g for g in descending if group_covers_geom(g, shp.geometry, basin_prop)]
 
         # Ensure minimum timing: n-1 images before BEGAN and 1 image after
         began_ts = shp["BEGAN"].to_pydatetime().timestamp()

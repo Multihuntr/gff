@@ -234,6 +234,7 @@ def progressively_grow_floodmaps(
         "transform": new_transform,
         "width": tile_grids[0, 0].shape[0] * tile_size,
         "height": tile_grids[0, 0].shape[1] * tile_size,
+        "bigtiff": "IF_NEEDED",
     }
     s1_fpaths = None
     s1_tifs = None
@@ -246,6 +247,7 @@ def progressively_grow_floodmaps(
             "transform": new_transform,
             "width": tile_grids[0, 0].shape[0] * tile_size,
             "height": tile_grids[0, 0].shape[1] * tile_size,
+            "bigtiff": "IF_NEEDED",
         }
         names = constants.KUROSIWO_S1_NAMES[-(len(inp_img_paths)) :]
         s1_folder = floodmap_path.parent / "s1-export"

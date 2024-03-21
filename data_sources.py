@@ -1,5 +1,6 @@
 import io
 import itertools
+import json
 import math
 import os
 from pathlib import Path
@@ -171,7 +172,8 @@ def download_s1(img_folder, asf_result, cred_fname=".asf_auth"):
     if not (zip_fpath.exists()):
         print("Downloading S1 image: ", zip_fpath)
         with open(cred_fname) as f:
-            username, password = f.read().strip().split(";")
+            cred = json.load(f)
+            username, password = cred["user"], cred["pass"]
         session = asf.ASFSession().auth_with_creds(username, password)
         url = asf_result["properties"]["url"]
         asf.download_url(url, path=img_folder, session=session)

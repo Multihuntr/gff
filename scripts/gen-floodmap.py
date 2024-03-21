@@ -86,18 +86,7 @@ def main(args):
         export_s1=args.export_s1,
     )
 
-    # Save the meta details to the meta index file
-    # NOT MULTIPROCESSING SAFE!
-    metas_fpath = args.data_folder / "meta.json"
-    if metas_fpath.exists():
-        with open(args.data_folder / "meta.json") as f:
-            metas = json.load(f)
-    else:
-        metas = []
-    metas.append(meta)
-
-    with open(args.data_folder / "metas.json", "w") as f:
-        json.dump(metas, f)
+    print(f"Saved {meta['FLOOD']}-{meta['HYBAS_ID']} to: {meta['floodmap']}")
 
 
 if __name__ == "__main__":

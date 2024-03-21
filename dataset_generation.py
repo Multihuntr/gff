@@ -1,6 +1,7 @@
 import datetime
 import functools
 import itertools
+import json
 import math
 from pathlib import Path
 import shutil
@@ -115,6 +116,7 @@ def create_flood_maps(
     # mid = (len(search_results) + first_after) // 2
     open_set = [[first_after - 2, first_after - 1, first_after]]
 
+    meta = None
     while len(open_set) > 0:
         search_idx = open_set.pop(0)
 
@@ -142,27 +144,29 @@ def create_flood_maps(
             print_freq=200,
         )
 
+        meta = {
+            "FLOOD": f"{basin_row.ID}",
+            "HYBAS_ID": f"{basin_row.HYBAS_ID}",
+            "pre2_date": search_results[search_idx[0]][0]["properties"]["startTime"],
+            "pre1_date": search_results[search_idx[1]][0]["properties"]["startTime"],
+            "post_date": search_results[search_idx[2]][0]["properties"]["startTime"],
+            "floodmap": str(floodmap_path.relative_to(data_folder)),
+            "visit_tiles": [shapely.get_coordinates(t).tolist() for t in visit_tiles],
+            "flood_tiles": [shapely.get_coordinates(t).tolist() for t in flood_tiles],
+        }
+        if export_s1:
+            meta["s1"] = [str(p.relative_to(data_folder)) for p in s1_export_paths]
+
         if len(flood_tiles) < 50:
             print(" No major flooding found.")
-            # floodmap_path.unlink()
-            # s1_export.unlink()
+            meta["flooding"] = False
+            # Try the next set
             new_search_idx = [idx + 1 for idx in search_idx]
             if all([i >= 0 and i < len(search_results) for i in new_search_idx]):
                 open_set.append(new_search_idx)
         else:
             print(" Major flooding found.")
-            meta = {
-                "FLOOD": f"{basin_row.ID}",
-                "HYBAS_ID": f"{basin_row.HYBAS_ID}",
-                "pre2_date": search_results[search_idx[0]][0]["properties"]["startTime"],
-                "pre1_date": search_results[search_idx[1]][0]["properties"]["startTime"],
-                "post_date": search_results[search_idx[2]][0]["properties"]["startTime"],
-                "floodmap": str(floodmap_path),
-                "visit_tiles": [shapely.get_coordinates(t).tolist() for t in visit_tiles],
-                "flood_tiles": [shapely.get_coordinates(t).tolist() for t in flood_tiles],
-            }
-            if export_s1:
-                meta["s1"] = [str(p) for p in s1_export_paths]
+            meta["flooding"] = True
 
             if export_s1:
                 for i, s1_export_path in enumerate(s1_export_paths):
@@ -173,12 +177,11 @@ def create_flood_maps(
                         s1_tif.update_tags(1, **desc_dict, polarisation="vv")
                         s1_tif.update_tags(2, **desc_dict, polarisation="vh")
                         s1_tif.descriptions = ["vv", "vh"]
-            # new_search_idx = [*[i - 1 for i in search_idx[:-1]], search_idx[-1]]
-            # if all([i >= 0 and i < len(search_results) for i in new_search_idx]):
-            #     open_set.append(new_search_idx)
-            return meta
-    print("No viable floods detected.")
-    return None
+            break
+
+    with floodmap_path.with_name(floodmap_path.stem + "-meta.json").open("w") as f:
+        json.dump(meta, f)
+    return meta
 
 
 def progressively_grow_floodmaps(
@@ -258,7 +261,8 @@ def progressively_grow_floodmaps(
 
     # Begin flood-fill search
     visit_tiles, flood_tiles = [], []
-    with rasterio.open(floodmap_path, "w", **profile) as out_tif:
+    raw_floodmap_path = floodmap_path.with_stem(floodmap_path.stem + "-raw")
+    with rasterio.open(raw_floodmap_path, "w", **profile) as out_tif:
         n_visited = 0
         n_flooded = 0
         n_permanent = 0
@@ -319,7 +323,8 @@ def progressively_grow_floodmaps(
     for tif in inp_tifs:
         tif.close()
 
-    postprocess(floodmap_path, visit_tiles, nodata=floodmap_nodata)
+    print(" Tile search complete. Postprocessing outputs.")
+    postprocess(raw_floodmap_path, floodmap_path, visit_tiles, nodata=floodmap_nodata)
     return visit_tiles, flood_tiles, s1_fpaths
 
 
@@ -616,20 +621,20 @@ def vit_decoder_runner():
     return run_flood_model
 
 
-def postprocess(fpath, tiles, nodata, **kwargs):
+def postprocess(in_fpath, out_fpath, tiles, nodata, **kwargs):
     """Clean up the edges + paste worldcover permanent water class"""
-    with rasterio.open(fpath) as out_tif:
+    with rasterio.open(in_fpath) as out_tif:
         floodmaps = out_tif.read()
         profile = out_tif.profile
 
     nan_mask = floodmaps == nodata
 
     floodmaps = postprocess_classes(floodmaps[0], mask=(~nan_mask)[0], **kwargs)[None]
-    folder = fpath.parent / "worldcover-cache"
+    folder = in_fpath.parent / "worldcover-cache"
     postprocess_world_cover(floodmaps, tiles, profile["transform"], profile["crs"], folder)
 
     floodmaps[nan_mask] = nodata
-    with rasterio.open(fpath.with_stem(fpath.stem + "-post"), "w", **profile) as out_tif:
+    with rasterio.open(out_fpath, "w", **profile) as out_tif:
         out_tif.write(floodmaps)
 
 

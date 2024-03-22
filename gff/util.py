@@ -7,7 +7,6 @@ import affine
 import geopandas
 import pyproj
 import rasterio
-import scipy.interpolate
 import shapely
 import numpy as np
 import pandas as pd

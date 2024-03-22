@@ -9,7 +9,7 @@ import numpy as np
 import rasterio
 import shapely
 
-import util
+import gff.util as util
 
 def parse_args(argv):
     parser = argparse.ArgumentParser("Group KuroSiwo targets into individual TIF files")

@@ -4,7 +4,6 @@ envs
 .vscode
 **/__pycache__
 data
-_*.py
 scraps
 .netrc
 preprocessing/Orbits

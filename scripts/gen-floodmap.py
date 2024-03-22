@@ -7,7 +7,7 @@ import warnings
 import geopandas
 import torch
 
-import dataset_generation
+import gff.dataset_generation as dataset_generation
 
 
 def parse_args(argv):

@@ -13,7 +13,7 @@ import asf_search as asf
 
 import xarray
 
-import util
+from . import util
 
 
 def download_url(url):

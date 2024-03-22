@@ -1,11 +1,8 @@
 import argparse
-import csv
 import sys
-import os
 from pathlib import Path
 
 import geopandas
-import tqdm
 import pandas as pd
 
 INCLUDE_TYPES = [

@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 import shutil
 import subprocess
+import traceback
 from typing import Union
 import warnings
 
@@ -19,9 +20,9 @@ import shapely
 import skimage
 import torch
 
-import constants
-import data_sources
-import util
+from . import constants
+from . import data_sources
+from . import util
 
 
 def check_tifs_match(tifs):
@@ -135,49 +136,53 @@ def create_flood_maps(
 
         filename = f"{cross_term}-{'-'.join(date_strs)}.tif"
         floodmap_path = data_folder / "floodmaps" / filename
-        visit_tiles, flood_tiles, s1_export_paths = progressively_grow_floodmaps(
-            s1_img_paths,
-            rivers_df,
-            floodmap_path,
-            flood_model,
-            export_s1=export_s1,
-            print_freq=200,
-        )
+        try:
+            visit_tiles, flood_tiles, s1_export_paths = progressively_grow_floodmaps(
+                s1_img_paths,
+                rivers_df,
+                floodmap_path,
+                flood_model,
+                export_s1=export_s1,
+                print_freq=200,
+            )
 
-        meta = {
-            "FLOOD": f"{basin_row.ID}",
-            "HYBAS_ID": f"{basin_row.HYBAS_ID}",
-            "pre2_date": search_results[search_idx[0]][0]["properties"]["startTime"],
-            "pre1_date": search_results[search_idx[1]][0]["properties"]["startTime"],
-            "post_date": search_results[search_idx[2]][0]["properties"]["startTime"],
-            "floodmap": str(floodmap_path.relative_to(data_folder)),
-            "visit_tiles": [shapely.get_coordinates(t).tolist() for t in visit_tiles],
-            "flood_tiles": [shapely.get_coordinates(t).tolist() for t in flood_tiles],
-        }
-        if export_s1:
-            meta["s1"] = [str(p.relative_to(data_folder)) for p in s1_export_paths]
-
-        if len(flood_tiles) < 50:
-            print(" No major flooding found.")
-            meta["flooding"] = False
-            # Try the next set
-            new_search_idx = [idx + 1 for idx in search_idx]
-            if all([i >= 0 and i < len(search_results) for i in new_search_idx]):
-                open_set.append(new_search_idx)
-        else:
-            print(" Major flooding found.")
-            meta["flooding"] = True
-
+            meta = {
+                "FLOOD": f"{basin_row.ID}",
+                "HYBAS_ID": f"{basin_row.HYBAS_ID}",
+                "pre2_date": search_results[search_idx[0]][0]["properties"]["startTime"],
+                "pre1_date": search_results[search_idx[1]][0]["properties"]["startTime"],
+                "post_date": search_results[search_idx[2]][0]["properties"]["startTime"],
+                "floodmap": str(floodmap_path.relative_to(data_folder)),
+                "visit_tiles": [shapely.get_coordinates(t).tolist() for t in visit_tiles],
+                "flood_tiles": [shapely.get_coordinates(t).tolist() for t in flood_tiles],
+            }
             if export_s1:
-                for i, s1_export_path in enumerate(s1_export_paths):
-                    with rasterio.open(s1_export_path, "r+") as s1_tif:
-                        desc_keys = ["flightDirection", "pathNumber", "startTime", "orbit"]
-                        props = search_results[search_idx[i]][0]["properties"]
-                        desc_dict = {k: props[k] for k in desc_keys}
-                        s1_tif.update_tags(1, **desc_dict, polarisation="vv")
-                        s1_tif.update_tags(2, **desc_dict, polarisation="vh")
-                        s1_tif.descriptions = ["vv", "vh"]
-            break
+                meta["s1"] = [str(p.relative_to(data_folder)) for p in s1_export_paths]
+
+            if len(flood_tiles) < 50:
+                print(" No major flooding found.")
+                meta["flooding"] = False
+                # Try the next set
+                new_search_idx = [idx + 1 for idx in search_idx]
+                if all([i >= 0 and i < len(search_results) for i in new_search_idx]):
+                    open_set.append(new_search_idx)
+            else:
+                print(" Major flooding found.")
+                meta["flooding"] = True
+
+                if export_s1:
+                    for i, s1_export_path in enumerate(s1_export_paths):
+                        with rasterio.open(s1_export_path, "r+") as s1_tif:
+                            desc_keys = ["flightDirection", "pathNumber", "startTime", "orbit"]
+                            props = search_results[search_idx[i]][0]["properties"]
+                            desc_dict = {k: props[k] for k in desc_keys}
+                            s1_tif.update_tags(1, **desc_dict, polarisation="vv")
+                            s1_tif.update_tags(2, **desc_dict, polarisation="vh")
+                            s1_tif.descriptions = ["vv", "vh"]
+                break
+        except Exception:
+            print(f"Search failed!")
+            print(traceback.format_exc())
 
     with floodmap_path.with_name(floodmap_path.stem + "-meta.json").open("w") as f:
         json.dump(meta, f)

@@ -17,6 +17,7 @@ from . import util
 
 
 def download_url(url):
+    print("Downloading ", url)
     with urllib.request.urlopen(url) as f:
         return f.read()
 
@@ -33,7 +34,7 @@ def degrees_to_north_east(north: int, east: int):
     return f"{ns}{north:02d}", f"{ew}{east:03d}"
 
 
-def get_cop_dem_file(north: int, east: int, name: str, folder: Path):
+def get_cop_dem_file(north: int, east: int, folder: Path, name: str):
     """
     Allowed names:
         COP-DEM_GLO-30-DGED/2021_1
@@ -52,7 +53,7 @@ def get_cop_dem_file(north: int, east: int, name: str, folder: Path):
     if final_fpath.exists():
         return final_fpath
     print(f"Downloading {tile_name}.tif to {final_fpath}")
-    final_fpath.mkdir(parents=True, exist_ok=True)
+    final_fpath.parent.mkdir(parents=True, exist_ok=True)
 
     # Download tar
     base_url = "https://prism-dem-open.copernicus.eu/pd-desk-open-access/prismDownload"
@@ -128,7 +129,7 @@ def get_world_cover_file(north: int, east: int, folder: Path):
     return fpath
 
 
-def get_nbyn_product(shp, shp_crs, folder, getter, n=1, **kwargs):
+def get_nbyn_product(shp, shp_crs, folder, getter, n=1, preprocess=None, **kwargs):
     """
     Get a product tiled with n-by-n degree squares.
 
@@ -146,7 +147,7 @@ def get_nbyn_product(shp, shp_crs, folder, getter, n=1, **kwargs):
     ew_ran = range(math.floor(xlo / n) * n, math.ceil(xhi / n) * n, n)
     ns_ran = range(math.floor(ylo / n) * n, math.ceil(yhi / n) * n, n)
     paths = [getter(ns, ew, folder, **kwargs) for ew, ns in itertools.product(ew_ran, ns_ran)]
-    dem = xarray.open_mfdataset(paths)
+    dem = xarray.open_mfdataset(paths, preprocess=preprocess)
     box = dem.sel(x=slice(xlo, xhi), y=slice(yhi, ylo))
 
     return box.compute()
@@ -156,9 +157,15 @@ def get_world_cover(shp, shp_crs, folder):
     return get_nbyn_product(shp, shp_crs, folder, get_world_cover_file, n=3)
 
 
+def _drop_last_pixel(ds):
+    return ds.isel(x=slice(len(ds.x) - 1), y=slice(len(ds.y) - 1))
+
+
 def get_dem(shp, shp_crs, folder, name="COP-DEM_GLO-30-DTED__2023_1"):
     if "COP-DEM" in name:
-        return get_nbyn_product(shp, shp_crs, folder, get_cop_dem_file, n=1, name=name)
+        return get_nbyn_product(
+            shp, shp_crs, folder, get_cop_dem_file, n=1, preprocess=_drop_last_pixel, name=name
+        )
     elif name == "SRTM 3Sec":
         return get_nbyn_product(shp, shp_crs, folder, get_srtm_dem_file, n=5, name=name)
     else:

@@ -5,7 +5,6 @@ import json
 import sys
 from pathlib import Path
 
-import numpy as np
 import rasterio
 import shapely
 
@@ -26,10 +25,12 @@ def main(args):
             info = json.load(f)
         d = datetime.datetime.fromisoformat(info["flood_date"])
         info['geom'] = shapely.from_wkt(info['geom'])
-        groups[d].append((p.parent, info))
+        groups[(d, info['aoiid'])].append((p.parent, info))
 
+    lbl_folder: Path = args.kw_folder / 'merged-labels'
+    lbl_folder.mkdir(exist_ok=True)
     d_fmt = '%Y-%m-%d'
-    for d, group in groups.items():
+    for (d, aoiid), group in groups.items():
         paths, infos = zip(*group)
         footprint = shapely.union_all([info['geom'] for info in infos]).convex_hull
         xlo, ylo, xhi, yhi = footprint.bounds
@@ -48,7 +49,8 @@ def main(args):
             'compress': 'PACKBITS',
             'nodata': 255
         }
-        with rasterio.open(args.kw_folder / f'{d.strftime(d_fmt)}.tif', 'w', **profile) as out_tif:
+        fname = f'{d.strftime(d_fmt)}_{aoiid}.tif'
+        with rasterio.open(lbl_folder / fname, 'w', **profile) as out_tif:
             for path, info in group:
                 target_file = [name for name in info['datasets'] if 'MK0_MLU_' in name][0]
                 with rasterio.open(path / f'{target_file}.tif') as in_tif:

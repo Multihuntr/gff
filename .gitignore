@@ -12,3 +12,4 @@ preprocessing/dem
 caravan/split
 *.tif
 *.png
+.create_some_maps.sh

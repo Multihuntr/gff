@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 import shutil
 import subprocess
+import traceback
 from typing import Union
 import warnings
 
@@ -19,9 +20,9 @@ import shapely
 import skimage
 import torch
 
-import constants
-import data_sources
-import util
+from . import constants
+from . import data_sources
+from . import util
 
 
 def check_tifs_match(tifs):
@@ -114,7 +115,7 @@ def create_flood_maps(
             first_after = i
             break
     # mid = (len(search_results) + first_after) // 2
-    open_set = [[first_after - 2, first_after - 1, first_after]]
+    open_set = [list(range(first_after - n_img + 1, first_after + 1))]
 
     meta = None
     while len(open_set) > 0:
@@ -223,8 +224,6 @@ def progressively_grow_floodmaps(
                 tiles.append(tile)
     visited = np.zeros_like(tile_grids[(0, 0)]).astype(bool)
     offset_cache = {(0, 1): {}, (1, 0): {}, (1, 1): {}}
-    if len(tiles) == 0:
-        raise Exception("Provided geometry does not intersect any rivers")
 
     # Rasterio profile handling
     outxlo, _, _, outyhi = viable_footprint.bounds
@@ -274,7 +273,7 @@ def progressively_grow_floodmaps(
             n_visited += 1
             tile_geom = tile_grids[(0, 0)][tile_x, tile_y]
             visit_tiles.append(tile_geom)
-            s1_inps, flood_logits = flood_model(inp_tifs, tile_geom)
+            s1_inps, dem, flood_logits = flood_model(inp_tifs, tile_geom)
             s1_inps = [t[0].cpu().numpy() for t in s1_inps]
             if not s1_preprocess_edge_heuristic(s1_inps):
                 n_outside += 1
@@ -388,7 +387,7 @@ def _ensure_logits(tifs, offset_tile_grid, x, y, flood_model, offset_cache):
     w, h = offset_tile_grid.shape
     if x >= 0 and y >= 0 and x < w and y < h:
         offset_tile_geom = offset_tile_grid[x, y]
-        _, offset_logits = flood_model(tifs, offset_tile_geom)
+        _, _, offset_logits = flood_model(tifs, offset_tile_geom)
         offset_cache[(x, y)] = offset_logits
     else:
         offset_cache[(x, y)] = None
@@ -586,13 +585,14 @@ def run_snunet_once(
     imgs,
     geom: shapely.Geometry,
     model: torch.nn.Module,
+    folder: Path,
     geom_in_px: bool = False,
     geom_crs: str = "EPSG:3857",
 ):
     inps = util.get_tiles_single(imgs, geom, geom_in_px)
 
     geom_4326 = util.convert_crs(geom, geom_crs, "EPSG:4326")
-    dem_coarse = data_sources.get_dem(geom_4326, shp_crs="EPSG:4326", folder=Path("preprocessing"))
+    dem_coarse = data_sources.get_dem(geom_4326, shp_crs="EPSG:4326", folder=folder)
     dem_fine = util.resample_xr(dem_coarse, geom_4326.bounds, inps[0].shape[2:])
     dem_th = dem_fine.band_data.values
     out = model(inps, dem=dem_th)[0].cpu().numpy()
@@ -604,7 +604,7 @@ def run_flood_vit_once(
 ):
     inps = util.get_tiles_single(imgs, geom, geom_in_px)
     out = model(inps)[0].cpu().numpy()
-    return inps, out
+    return inps, None, out
 
 
 def run_flood_vit_batched(
@@ -612,7 +612,7 @@ def run_flood_vit_batched(
 ):
     inps = util.get_tiles_batched(imgs, geoms, geoms_in_px)
     out = model(inps).cpu().numpy()
-    return inps, out
+    return inps, None, out
 
 
 def vit_decoder_runner():
@@ -621,8 +621,20 @@ def vit_decoder_runner():
     return run_flood_model
 
 
+def snunet_runner(crs, folder):
+    flood_model = torch.hub.load("Multihuntr/KuroSiwo", "snunet", pretrained=True).cuda()
+    run_flood_model = lambda tifs, geom: run_snunet_once(
+        tifs[-2:], geom, flood_model, folder, geom_crs=crs
+    )
+    return run_flood_model
+
+
 def postprocess(in_fpath, out_fpath, tiles, nodata, **kwargs):
-    """Clean up the edges + paste worldcover permanent water class"""
+    """
+    Postprocessing:
+    - Clean up the edges
+    - Paste worldcover permanent water class
+    """
     with rasterio.open(in_fpath) as out_tif:
         floodmaps = out_tif.read()
         profile = out_tif.profile
@@ -686,6 +698,7 @@ def postprocess_world_cover(floodmaps, tiles, transform, crs, folder):
         cover_res = util.resample_xr(cover, tile.bounds, ((yhi - ylo), (xhi - xlo)))
 
         # Apply permanent water class
-        cover_np = cover_res.band_data.values.astype(np.uint8)
+        with warnings.catch_warnings(action="ignore"):
+            cover_np = cover_res.band_data.values.astype(np.uint8)
         permanent_water_mask = cover_np == constants.WORLDCOVER_PW_CLASS
         floodmaps[:, ylo:yhi, xlo:xhi][permanent_water_mask] = constants.KUROSIWO_PW_CLASS

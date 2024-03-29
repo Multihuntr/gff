@@ -12,9 +12,9 @@ import torch
 import torch.nn as nn
 import tqdm
 
-import constants
-import data_sources
-import util
+import gff.constants as constants
+import gff.data_sources as data_sources
+import gff.util as util
 
 
 def load_tile(p):

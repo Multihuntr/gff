@@ -5,9 +5,10 @@ from pathlib import Path
 import warnings
 
 import geopandas
+import numpy as np
 import torch
 
-import dataset_generation
+import gff.dataset_generation as dataset_generation
 
 
 def parse_args(argv):
@@ -19,7 +20,7 @@ def parse_args(argv):
     parser.add_argument("hybas_id", type=int)
     parser.add_argument("--export_s1", action="store_true", help="export S1 alongside floodmaps")
     # parser.add_argument("hub_url", type=str, help="torch.hub url of flood mapping model")
-    # parser.add_argument("model_name", type=str, help="torch.hub model name at url")
+    parser.add_argument("--model", type=str, default="vit", choices=["vit", "snunet"])
 
     return parser.parse_args(argv)
 
@@ -52,7 +53,10 @@ def main(args):
     ]
     """
     torch.set_grad_enabled(False)
-    run_flood_model = dataset_generation.vit_decoder_runner()
+    if args.model == "vit":
+        run_flood_model = dataset_generation.vit_decoder_runner()
+    elif args.model == "snunet":
+        run_flood_model = dataset_generation.snunet_runner("EPSG:4326", args.data_folder)
     rivers_df = dataset_generation.load_rivers(args.hydroatlas_path)
 
     # Get search results
@@ -60,7 +64,7 @@ def main(args):
         s1_index = json.load(f)
     search_results = s1_index[f"{args.flood_id}-{args.hybas_id}"]
 
-    # Get basin row
+    # Get basin x flood row
     gpkg_path = args.data_folder / "basin_floods.gpkg"
     cond = "BEGAN >= '2014-01-01'"
     with warnings.catch_warnings(action="ignore"):

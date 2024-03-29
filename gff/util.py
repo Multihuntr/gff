@@ -7,7 +7,6 @@ import affine
 import geopandas
 import pyproj
 import rasterio
-import scipy.interpolate
 import shapely
 import numpy as np
 import pandas as pd
@@ -174,6 +173,34 @@ def get_tiles_batched(imgs, geoms: shapely.Geometry, geom_in_px: bool = False):
         img_batch = np.stack(img_windows)
         inps.append(torch.tensor(img_batch).cuda())
     return inps
+
+
+def tile_mask_for_basin(in_tiles, basins_df):
+    """
+    Create a mask to exclude tiles outside the majority basin
+    (which basin is the majority basin is also calculated here)
+    """
+    # Extract shapes
+    tiles = np.array([shapely.Polygon(t) for t in in_tiles])
+    tile_centers = np.array([shapely.centroid(p) for p in tiles])
+    basin_geoms = np.array(basins_df.geometry.values)
+
+    # Identify basin by majority voting across tiles
+    tiles_in_basins = shapely.within(tile_centers[None], basin_geoms[:, None])
+    basin_idx = np.argmax(tiles_in_basins.sum(axis=1)).item()
+    hybas_id = basins_df.iloc[basin_idx].HYBAS_ID
+
+    # Calculate a mask to remove tiles
+    # Remove tiles in another basin, but keep a few tiles at the ocean's edge
+    other_basins = np.concatenate(
+        [tiles_in_basins[:basin_idx], tiles_in_basins[(basin_idx + 1) :]]
+    )
+    exclude_mask = np.any(other_basins, axis=0)
+    basin_geom = basin_geoms[basin_idx]
+    just_a_bit_of_ocean = shapely.buffer(basin_geom, 0.04).simplify(0.01)
+    exclude_mask |= ~shapely.within(tile_centers, just_a_bit_of_ocean)
+
+    return hybas_id, exclude_mask
 
 
 # Basin selection utilities

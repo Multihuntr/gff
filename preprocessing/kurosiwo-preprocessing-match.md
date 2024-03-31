@@ -1,4 +1,8 @@
-# Matching KuroSiwo's preprocessing
+# TL;DR
+
+I worked out a gpt graph.xml, and am running it through docker to ensure consistency.
+
+# Documenting the process to match KuroSiwo's preprocessing
 
 Method to compare:
 1. I opened the catalogue, and chose a patch that was in the 01.tar.gz archive (didn't want to download all of KuroSiwo). Specifically, I chose a patch that had a recorded flood percentage a little more than 50%, but less than 70% (using info.json's "pflood" property).
@@ -53,4 +57,4 @@ Method to compare:
 
 The chosen settings in `preprocess.py` are the result of some guesswork. The resulting tile looks almost the same, just resampling and some extra spots in their data. Otherwise effectively identical.
 
-For some reason the "AddElevation" operation does not add the DEM correctly, so I ended up writing my own version.
+For some reason the "AddElevation" operation does not add the DEM correctly (position is offset), so I ended up writing my own version.

@@ -55,7 +55,7 @@ def ensure_s1(data_folder, prefix, results, delete_intermediate=False):
         data_sources.preprocess_s1(data_folder, zip_fpath.name, dim_fname)
         # DIMAP is a weird format. You ask it to save at ".dim" and it actually saves elsewhere
         # Anyway, need to combine the vv and vh bands into a single file for later merge
-        data_path = img_folder / "tmp" / dim_fname.with_suffix(".data")
+        dim_data_path = img_folder / "tmp" / dim_fname.with_suffix(".data")
         processed_fpath = img_folder / dim_fname.with_suffix(".tif")
         processed_fpaths.append(processed_fpath)
         if not processed_fpath.exists():
@@ -66,13 +66,13 @@ def ensure_s1(data_folder, prefix, results, delete_intermediate=False):
                     "-separate",
                     "-o",
                     processed_fpath,
-                    data_path / "Sigma0_VV.img",
-                    data_path / "Sigma0_VH.img",
+                    dim_data_path / "Sigma0_VV.img",
+                    dim_data_path / "Sigma0_VH.img",
                 ]
             )
             if delete_intermediate:
-                shutil.rmtree(data_path)
-                data_path.with_suffix(".dim").unlink()
+                shutil.rmtree(dim_data_path)
+                dim_data_path.with_suffix(".dim").unlink()
 
     if len(processed_fpaths) > 1:
         print("Merging multiple captures from the same day into a single tif")
@@ -80,12 +80,22 @@ def ensure_s1(data_folder, prefix, results, delete_intermediate=False):
     else:
         shutil.copy(processed_fpaths[0], out_fpath)
 
+    print("Compressing result")
+    tmp_compress_path = img_folder / "tmp" / filename
+    compress_args = ["-co", "COMPRESS=LERC", "-co", "MAX_Z_ERROR=0.0001"]
+    util_args = ["-co", "BIGTIFF=YES", "-co", "INTERLEAVE=BAND"]
+    subprocess.run(["gdal_translate", *compress_args, *util_args, out_fpath, tmp_compress_path])
+    shutil.move(tmp_compress_path, out_fpath)
+
     if delete_intermediate:
-        for p in zip_fpaths:
-            p.unlink()
         for p in processed_fpaths:
             p.unlink()
     return out_fpath
+
+
+def check_floodmap_exists(data_folder, cross_term):
+    files = list((data_folder / "floodmaps").glob(f"{cross_term}-*-meta.json"))
+    return len(files) >= 1
 
 
 def create_flood_maps(
@@ -275,7 +285,7 @@ def progressively_grow_floodmaps(
             visit_tiles.append(tile_geom)
             s1_inps, dem, flood_logits = flood_model(inp_tifs, tile_geom)
             s1_inps = [t[0].cpu().numpy() for t in s1_inps]
-            if not s1_preprocess_edge_heuristic(s1_inps):
+            if not s1_preprocess_edge_heuristic(s1_inps) or flood_logits is None:
                 n_outside += 1
                 continue
 
@@ -592,7 +602,10 @@ def run_snunet_once(
     inps = util.get_tiles_single(imgs, geom, geom_in_px)
 
     geom_4326 = util.convert_crs(geom, geom_crs, "EPSG:4326")
-    dem_coarse = data_sources.get_dem(geom_4326, shp_crs="EPSG:4326", folder=folder)
+    try:
+        dem_coarse = data_sources.get_dem(geom_4326, shp_crs="EPSG:4326", folder=folder)
+    except data_sources.URLNotAvailable:
+        return inps, None, None
     dem_fine = util.resample_xr(dem_coarse, geom_4326.bounds, inps[0].shape[2:])
     dem_th = dem_fine.band_data.values
     out = model(inps, dem=dem_th)[0].cpu().numpy()

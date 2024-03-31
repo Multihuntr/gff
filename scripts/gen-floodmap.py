@@ -21,6 +21,9 @@ def parse_args(argv):
     parser.add_argument("--export_s1", action="store_true", help="export S1 alongside floodmaps")
     # parser.add_argument("hub_url", type=str, help="torch.hub url of flood mapping model")
     parser.add_argument("--model", type=str, default="vit", choices=["vit", "snunet"])
+    parser.add_argument(
+        "--overwrite", action="store_true", help="Recompute even if floodmap already exists"
+    )
 
     return parser.parse_args(argv)
 
@@ -30,28 +33,19 @@ def main(args):
     Final folder structure:
         basin_floods.gpkg
         index.json
-        meta.json
         s1/
             [FLOOD_ID]-[HYBAS_ID]-[YYYYMMDD].tif    # contains both vv and vh
         floodmaps/
-            [FLOOD_ID]-[HYBAS_ID].tif
-        shps.gpkg
-
-    meta.json structured like:
-    [
-        {
-            'HYBAS_ID': <HYBAS_ID>,
-            'FLOOD': <FLOOD_ID>,
-            'BEGAN': <date isoformat>,
-            'ENDED': <date isoformat>,
-            'pre1': 's1/[FLOOD_ID]-[HYBAS_ID]-[YYYMMDD].tif',
-            'pre2': 's1/[FLOOD_ID]-[HYBAS_ID]-[YYYMMDD].tif',
-            'post': 's1/[FLOOD_ID]-[HYBAS_ID]-[YYYMMDD].tif',
-            'floodmap': 'floodmaps/[FLOOD_ID]-[HYBAS_ID].tif',
-            'tiles': [<idx>, <idx>, <idx>, ...] # indices into shps.gpkg
-        }, ...
-    ]
+            [FLOOD_ID]-[HYBAS_ID]-[YYYY-MM-DD]-[YYYY-MM-DD]-[YYYY-MM-DD].tif
+            [FLOOD_ID]-[HYBAS_ID]-[YYYY-MM-DD]-[YYYY-MM-DD]-[YYYY-MM-DD]-meta.json
     """
+    key = f"{args.flood_id}-{args.hybas_id}"
+    if not (args.overwrite):
+        if dataset_generation.check_floodmap_exists(args.data_folder, key):
+            print(f"Floodmap for {key} already exists, not overwriting.")
+            return
+    print(f"Creating floodmaps for {key}.")
+
     torch.set_grad_enabled(False)
     if args.model == "vit":
         run_flood_model = dataset_generation.vit_decoder_runner()
@@ -62,7 +56,7 @@ def main(args):
     # Get search results
     with open(args.data_folder / "index.json") as f:
         s1_index = json.load(f)
-    search_results = s1_index[f"{args.flood_id}-{args.hybas_id}"]
+    search_results = s1_index[key]
 
     # Get basin x flood row
     gpkg_path = args.data_folder / "basin_floods.gpkg"

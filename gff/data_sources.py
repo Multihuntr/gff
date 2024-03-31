@@ -5,6 +5,7 @@ import math
 import os
 from pathlib import Path
 import subprocess
+import time
 import urllib
 import tarfile
 import zipfile
@@ -16,10 +17,27 @@ import xarray
 from . import util
 
 
+class URLNotAvailable(Exception):
+    pass
+
+
+_tried = {}
+
+
 def download_url(url):
-    print("Downloading ", url)
-    with urllib.request.urlopen(url) as f:
-        return f.read()
+    if url in _tried:
+        raise URLNotAvailable()
+    print("Downloading", url)
+    for i in range(3):
+        try:
+            with urllib.request.urlopen(url) as f:
+                return f.read()
+        except:
+            print("Server returned error. Trying again in a few seconds.")
+            time.sleep(3)
+    _tried[url] = True
+    print("URL not available.")
+    raise URLNotAvailable()
 
 
 def degrees_to_north_east(north: int, east: int):
@@ -52,7 +70,6 @@ def get_cop_dem_file(north: int, east: int, folder: Path, name: str):
     final_fpath = folder / "dem" / name / f"{tile_name}.tif"
     if final_fpath.exists():
         return final_fpath
-    print(f"Downloading {tile_name}.tif to {final_fpath}")
     final_fpath.parent.mkdir(parents=True, exist_ok=True)
 
     # Download tar
@@ -74,6 +91,7 @@ def get_cop_dem_file(north: int, east: int, folder: Path, name: str):
     comp_opts = ["-co", "COMPRESS=PACKBITS"]
     subprocess.run(["gdal_translate", tmp_fpath, final_fpath, *tile_opts, *comp_opts])
     tmp_fpath.unlink()
+    print(f"Downloaded {tile_name}.tif to {final_fpath}")
     return final_fpath
 
 
@@ -86,7 +104,6 @@ def get_srtm_dem_file(north: int, east: int, folder: Path):
     final_fpath = folder / "dem" / "SRTM 3Sec" / f"{tile_name}.tif"
     if final_fpath.exists():
         return final_fpath
-    print(f"Downloading {tile_name}.tif to {final_fpath}")
 
     # Download zip
     base_url = "https://download.esa.int/step/auxdata/dem/SRTM90/tiff"
@@ -106,6 +123,7 @@ def get_srtm_dem_file(north: int, east: int, folder: Path):
     comp_opts = ["-co", "COMPRESS=PACKBITS"]
     subprocess.run(["gdal_translate", tmp_fpath, final_fpath, *tile_opts, *comp_opts])
     tmp_fpath.unlink()
+    print(f"Downloaded {tile_name}.tif to {final_fpath}")
     return final_fpath
 
 

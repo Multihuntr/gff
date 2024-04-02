@@ -93,13 +93,24 @@ def ensure_s1(data_folder, prefix, results, delete_intermediate=False):
     return out_fpath
 
 
-def check_floodmap_exists(data_folder, cross_term):
-    files = list((data_folder / "floodmaps").glob(f"{cross_term}-*-meta.json"))
+def check_floodmap_exists(data_folder, cross_term, floodmap_folder):
+    folder = data_folder / "floodmaps"
+    if floodmap_folder is not None:
+        folder = folder / floodmap_folder
+
+    files = list((folder).glob(f"{cross_term}-*-meta.json"))
     return len(files) >= 1
 
 
 def create_flood_maps(
-    data_folder, search_results, basin_row, rivers_df, flood_model, export_s1=True, n_img=3
+    data_folder,
+    search_results,
+    basin_row,
+    rivers_df,
+    flood_model,
+    export_s1=True,
+    n_img=3,
+    floodmap_folder=None,
 ):
     """
     Creates flood maps for a single basin x flood shape by starting along rivers
@@ -145,10 +156,15 @@ def create_flood_maps(
         print(f"Searching  {cross_term}  using S1 from   {'  '.join(date_strs)}")
 
         filename = f"{cross_term}-{'-'.join(date_strs)}.tif"
-        floodmap_path = data_folder / "floodmaps" / filename
+        if floodmap_folder is not None:
+            floodmap_path = data_folder / "floodmaps" / floodmap_folder / filename
+        else:
+            floodmap_path = data_folder / "floodmaps" / filename
+        floodmap_path.parent.mkdir(exist_ok=True)
         visit_tiles, flood_tiles, s1_export_paths = progressively_grow_floodmaps(
             s1_img_paths,
             rivers_df,
+            data_folder,
             floodmap_path,
             flood_model,
             export_s1=export_s1,
@@ -198,6 +214,7 @@ def create_flood_maps(
 def progressively_grow_floodmaps(
     inp_img_paths: list[Path],
     rivers_df: geopandas.GeoDataFrame,
+    data_folder: Path,
     floodmap_path: Path,
     flood_model: Union[torch.nn.Module, callable],
     tile_size: int = 224,
@@ -263,7 +280,7 @@ def progressively_grow_floodmaps(
             "BIGTIFF": "IF_NEEDED",
         }
         names = constants.KUROSIWO_S1_NAMES[-(len(inp_img_paths)) :]
-        s1_folder = floodmap_path.parent / "s1-export"
+        s1_folder = data_folder / "s1-export"
         s1_folder.mkdir(exist_ok=True)
         s1_fpaths = [s1_folder / f"{floodmap_path.stem}_{n}.tif" for n in names]
         s1_tifs = [rasterio.open(p, "w", **s1_profile) for p in s1_fpaths]
@@ -333,7 +350,7 @@ def progressively_grow_floodmaps(
         tif.close()
 
     print(" Tile search complete. Postprocessing outputs.")
-    postprocess(raw_floodmap_path, floodmap_path, visit_tiles, nodata=floodmap_nodata)
+    postprocess(data_folder, raw_floodmap_path, floodmap_path, visit_tiles, nodata=floodmap_nodata)
     return visit_tiles, flood_tiles, s1_fpaths
 
 
@@ -620,6 +637,30 @@ def run_flood_vit_once(
     return inps, None, out
 
 
+def run_flood_vit_and_snunet_once(
+    imgs,
+    geom: shapely.Geometry,
+    vit_model: torch.nn.Module,
+    snunet_model: torch.nn.Module,
+    folder: Path,
+    geom_in_px: bool = False,
+    geom_crs: str = "EPSG:3857",
+):
+    inps = util.get_tiles_single(imgs, geom, geom_in_px)
+
+    geom_4326 = util.convert_crs(geom, geom_crs, "EPSG:4326")
+    try:
+        dem_coarse = data_sources.get_dem(geom_4326, shp_crs="EPSG:4326", folder=folder)
+    except data_sources.URLNotAvailable:
+        return inps, None, None
+    dem_fine = util.resample_xr(dem_coarse, geom_4326.bounds, inps[0].shape[2:])
+    dem_th = dem_fine.band_data.values
+    vit_out = vit_model(inps)[0].cpu().numpy()
+    snunet_out = snunet_model(inps[-2:], dem=dem_th)[0].cpu().numpy()
+    out = (vit_out + snunet_out) / 2
+    return inps, dem_th, out
+
+
 def run_flood_vit_batched(
     imgs, geoms: np.ndarray, model: torch.nn.Module, geoms_in_px: bool = False
 ):
@@ -642,7 +683,16 @@ def snunet_runner(crs, folder):
     return run_flood_model
 
 
-def postprocess(in_fpath, out_fpath, tiles, nodata, **kwargs):
+def average_vit_snunet_runner(crs, folder):
+    vit_model = torch.hub.load("Multihuntr/KuroSiwo", "vit_decoder", pretrained=True).cuda()
+    snunet_model = torch.hub.load("Multihuntr/KuroSiwo", "snunet", pretrained=True).cuda()
+    run_flood_model = lambda tifs, geom: run_flood_vit_and_snunet_once(
+        tifs, geom, vit_model, snunet_model, folder, geom_crs=crs
+    )
+    return run_flood_model
+
+
+def postprocess(data_folder, in_fpath, out_fpath, tiles, nodata, **kwargs):
     """
     Postprocessing:
     - Clean up the edges
@@ -655,7 +705,7 @@ def postprocess(in_fpath, out_fpath, tiles, nodata, **kwargs):
     nan_mask = floodmaps == nodata
 
     floodmaps = postprocess_classes(floodmaps[0], mask=(~nan_mask)[0], **kwargs)[None]
-    folder = in_fpath.parent / "worldcover-cache"
+    folder = data_folder / "worldcover"
     postprocess_world_cover(floodmaps, tiles, profile["transform"], profile["crs"], folder)
 
     floodmaps[nan_mask] = nodata

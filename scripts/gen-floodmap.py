@@ -20,10 +20,13 @@ def parse_args(argv):
     parser.add_argument("hybas_id", type=int)
     parser.add_argument("--export_s1", action="store_true", help="export S1 alongside floodmaps")
     # parser.add_argument("hub_url", type=str, help="torch.hub url of flood mapping model")
-    parser.add_argument("--model", type=str, default="vit", choices=["vit", "snunet"])
+    parser.add_argument(
+        "--model", type=str, default="vit", choices=["vit", "snunet", "vit+snunet"]
+    )
     parser.add_argument(
         "--overwrite", action="store_true", help="Recompute even if floodmap already exists"
     )
+    parser.add_argument("--floodmap_folder", type=str, default=None)
 
     return parser.parse_args(argv)
 
@@ -41,7 +44,7 @@ def main(args):
     """
     key = f"{args.flood_id}-{args.hybas_id}"
     if not (args.overwrite):
-        if dataset_generation.check_floodmap_exists(args.data_folder, key):
+        if dataset_generation.check_floodmap_exists(args.data_folder, key, args.floodmap_folder):
             print(f"Floodmap for {key} already exists, not overwriting.")
             return
     print(f"Creating floodmaps for {key}.")
@@ -51,6 +54,10 @@ def main(args):
         run_flood_model = dataset_generation.vit_decoder_runner()
     elif args.model == "snunet":
         run_flood_model = dataset_generation.snunet_runner("EPSG:4326", args.data_folder)
+    elif args.model == "vit+snunet":
+        run_flood_model = dataset_generation.average_vit_snunet_runner(
+            "EPSG:4326", args.data_folder
+        )
     rivers_df = dataset_generation.load_rivers(args.hydroatlas_path)
 
     # Get search results
@@ -82,6 +89,7 @@ def main(args):
         rivers_df,
         run_flood_model,
         export_s1=args.export_s1,
+        floodmap_folder=args.floodmap_folder,
     )
 
     print(f"Saved {meta['FLOOD']}-{meta['HYBAS_ID']} to: {meta['floodmap']}")

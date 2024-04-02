@@ -109,8 +109,13 @@ def convert_crs(shp: shapely.Geometry, _from: str, _to: str):
 
 
 def convert_affine_inplace(shp, transform: affine.Affine, dtype=np.float64):
+    op = lambda coords: np.array(transform * coords.T, dtype=dtype).T
+    return convert_shp_inplace(shp, op)
+
+
+def convert_shp_inplace(shp, op: callable):
     coords = shapely.get_coordinates(shp).astype(np.float64)
-    coords_transformed = np.array(transform * coords.T, dtype=dtype).T
+    coords_transformed = op(coords)
     shapely.set_coordinates(shp, coords_transformed)
     return shp
 

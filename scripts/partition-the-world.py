@@ -86,12 +86,8 @@ def count_within(points, partition):
     return within.sum()
 
 
-def count_groups(partitions, group, index):
-    # Group by the column, and reindex to catch rows with a count of 0
-    partition_groups = [
-        p.groupby(group).count().reindex(index=index).HYBAS_ID.fillna(0).astype(int).values
-        for p in partitions
-    ]
+def count_groups(partitions, column, index):
+    partition_groups = [util.count_group(p, column, index) for p in partitions]
     return np.array(partition_groups).T
 
 

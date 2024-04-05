@@ -120,6 +120,11 @@ def convert_shp_inplace(shp, op: callable):
     return shp
 
 
+def count_group(df, column, index):
+    # Group by the column, count and reindex to catch rows with a count of 0
+    return df.groupby(column).count().reindex(index=index).HYBAS_ID.fillna(0).astype(int).values
+
+
 # Raster geometry utilities
 
 

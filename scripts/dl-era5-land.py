@@ -180,7 +180,7 @@ def get_new_band_names(dataset, prefix, band_names):
     return year_month_band_names
 
 
-def download_locally(year, month, dataset, gservice, local_folder, band_names):
+def download_locally(year, month, dataset, gservice, local_folder, band_names, prefix):
     # Determine date range
     start_date = f"{year:04d}-{month:02d}"
     end_year = year + (month // 12)
@@ -190,7 +190,7 @@ def download_locally(year, month, dataset, gservice, local_folder, band_names):
     new_band_names = get_new_band_names(filtered_dataset, start_date, band_names)
 
     # Submit export job to google and wait until done
-    fname = f"era5-land-{start_date}"
+    fname = f"{prefix}-{start_date}"
     local_fpath = local_folder / f"{fname}.tif"
     if local_fpath.exists():
         logging.info(f"[{fname}] Found locally; skipping entirely.")
@@ -235,16 +235,20 @@ def parse_args():
     parser.add_argument(
         "--n_concurrent", type=int, default=3, help="how many concurrent requests to run"
     )
+    parser.add_argument(
+        "--not-land", action="store_true", help="default: ERA5-Land, if provided, download ERA5"
+    )
 
     return parser.parse_args()
 
 
-# From: https://github.com/kratzert/Caravan/blob/4ef0dc13052ada53968be43b008738cb8335e31b/code/Caravan_part1_Earth_Engine.ipynb#L873
-# Note that I am downloading post-processed version,
+# ERA5Land bands from:
+#  https://github.com/kratzert/Caravan/blob/4ef0dc13052ada53968be43b008738cb8335e31b/code/Caravan_part1_Earth_Engine.ipynb#L873
+# Note that we are downloading post-processed version,
 # and some band names have "_sum" appended to the end
-START_DATE = "1980-01-01"  # Format: YYYY-MM-DD
-END_DATE = "2021-01-01"  # Format: YYYY-MM-DD
-YEAR_RANGE = range(1980, 2021)
+START_DATE = "2014-01-01"  # Format: YYYY-MM-DD
+END_DATE = "2023-01-01"  # Format: YYYY-MM-DD
+YEAR_RANGE = range(2014, 2024)
 MONTH_RANGE = range(1, 13)
 ERA5L_BANDS = [
     "dewpoint_temperature_2m",
@@ -262,18 +266,37 @@ ERA5L_BANDS = [
     "snow_depth_water_equivalent",
     "potential_evaporation_sum",
 ]
+ERA5_BANDS = [
+    "mean_2m_air_temperature",
+    "minimum_2m_air_temperature",
+    "maximum_2m_air_temperature",
+    "dewpoint_2m_temperature",
+    "total_precipitation",
+    "surface_pressure",
+    "mean_sea_level_pressure",
+    "u_component_of_wind_10m",
+    "v_component_of_wind_10m",
+]
 SANS_ANTARCTICA = shapely.polygons([[[-179, 85], [179, 85], [179, -60], [-179, -60]]])
 
 
 def main(args, gservice):
-    dataset = ee.ImageCollection("ECMWF/ERA5_LAND/DAILY_AGGR").select(*ERA5L_BANDS)
+    if not (args.not_land):
+        band_names = ERA5L_BANDS
+        prefix = "era5-land"
+        dataset = ee.ImageCollection("ECMWF/ERA5_LAND/DAILY_AGGR").select(*ERA5L_BANDS)
+    else:
+        band_names = ERA5_BANDS
+        prefix = "era5"
+        dataset = ee.ImageCollection("ECMWF/ERA5/DAILY").select(*ERA5_BANDS)
 
     _download_locally_partial = functools.partial(
         download_locally,
         dataset=dataset,
         gservice=gservice,
         local_folder=args.folder,
-        band_names=ERA5L_BANDS,
+        band_names=band_names,
+        prefix=prefix,
     )
 
     with ThreadPoolExecutor(max_workers=args.n_concurrent) as executor:

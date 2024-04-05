@@ -20,3 +20,4 @@ dependencies:
   - richdem
   - asf_search
   - scikit-image
+  - openpyxl

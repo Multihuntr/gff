@@ -121,11 +121,20 @@ Hand-labelled flood maps (WONTDO: Kuro Siwo casts doubt on applicability, and is
 * Purpose: P3
 
 Local Satellite Images (TODO: After specific test sites determine)
-* Sentinel-1/2 images
+* Sentinel-1 images
 * Source: Alaska Satellite Facility (through `asf_search`)
-* Size:
+* Size: 1000GB
 * Purpose: P3
 
+### Statistics
+
+Datasets used to calculate upstream country/continent stats. i.e. Stats not based on our data. e.g. How many floods per country?
+
+DRMKC - INFORM
+* Source: https://drmkc.jrc.ec.europa.eu/inform-index/Portals/0/InfoRM/2024/INFORM_Risk_2024_v067.xlsx
+
+World Administrative boundaries
+* Source: https://public.opendatasoft.com/api/explore/v2.1/catalog/datasets/world-administrative-boundaries/exports/fgb?lang=en
 
 ## Models
 Flood maps from Sentinel-1

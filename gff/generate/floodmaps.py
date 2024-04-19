@@ -20,9 +20,10 @@ import shapely
 import skimage
 import torch
 
-from . import constants
-from . import data_sources
-from . import util
+from gff import constants
+from gff import data_sources
+from gff import util
+import gff.generate.util
 
 
 def check_tifs_match(tifs):
@@ -93,13 +94,27 @@ def ensure_s1(data_folder, prefix, results, delete_intermediate=False):
     return out_fpath
 
 
-def check_floodmap_exists(data_folder, cross_term, floodmap_folder):
+def floodmap_meta_fpaths(data_folder, cross_term, floodmap_folder):
     folder = data_folder / "floodmaps"
     if floodmap_folder is not None:
         folder = folder / floodmap_folder
 
-    files = list((folder).glob(f"{cross_term}-*-meta.json"))
-    return len(files) >= 1
+    return list((folder).glob(f"{cross_term}-*-meta.json"))
+
+
+def check_floodmap_exists(data_folder, cross_term, floodmap_folder):
+    fpaths = floodmap_meta_fpaths(data_folder, cross_term, floodmap_folder)
+    return len(fpaths) >= 1
+
+
+def load_metas(data_folder, cross_term, floodmap_folder):
+    fpaths = floodmap_meta_fpaths(data_folder, cross_term, floodmap_folder)
+    fpaths.sort()
+    metas = []
+    for fpath in fpaths:
+        with open(fpath) as f:
+            metas.append(json.load(f))
+    return metas
 
 
 def create_flood_maps(
@@ -124,28 +139,29 @@ def create_flood_maps(
     This will stop when flooding is found, or we run out of sentinel images.
     """
     cross_term = f"{basin_row.ID}-{basin_row.HYBAS_ID}"
+    print(f"Generating floodmaps for  {cross_term}")
 
-    # Who knows? *shrug*
-    # Pick the first one
+    # How to choose combinations of S1? Who knows? *shrug*
+    # Pick the first triplet, then, if no flooding, choose the next triplet
 
-    start_ts = basin_row["BEGAN"].to_pydatetime().timestamp()
-    first_after = None
-    for i, result in enumerate(search_results):
-        ts = datetime.datetime.fromisoformat(result[0]["properties"]["startTime"]).timestamp()
-        if ts >= start_ts:
-            first_after = i
-            break
-    # mid = (len(search_results) + first_after) // 2
-    open_set = [list(range(first_after - n_img + 1, first_after + 1))]
+    # Determine the first S1 image after the flood began
+    if isinstance(basin_row["BEGAN"], str):
+        start_ts = datetime.datetime.fromisoformat(basin_row["BEGAN"]).timestamp()
+    else:
+        start_ts = basin_row["BEGAN"].to_pydatetime().timestamp()
+    search_idx = gff.generate.util.initial_search_floodmap_idx(search_results, start_ts, n_img)
+    if search_idx is None:
+        print("No overlap between S1 images; exiting early. No floodmaps generated.")
+        return
 
     meta = None
-    while len(open_set) > 0:
-        search_idx = open_set.pop(0)
+    metas = []
+    while search_idx is not None:
+        results_group = [search_results[i] for i in search_idx]
 
         s1_img_paths = []
         date_strs = []
-        for i in search_idx:
-            res = search_results[i]
+        for res in results_group:
             # Get image
             img_path = ensure_s1(data_folder, cross_term, res, delete_intermediate=True)
             s1_img_paths.append(img_path)
@@ -153,33 +169,39 @@ def create_flood_maps(
             res_date = datetime.datetime.fromisoformat(res[0]["properties"]["startTime"])
             date_strs.append(res_date.strftime("%Y-%m-%d"))
 
-        print(f"Searching  {cross_term}  using S1 from   {'  '.join(date_strs)}")
+        print(f"Generating for  {cross_term}  using S1 from   {'  '.join(date_strs)}")
 
-        filename = f"{cross_term}-{'-'.join(date_strs)}.tif"
+        tif_filename = Path(f"{cross_term}-{'-'.join(date_strs)}.tif")
+        meta_filename = tif_filename.with_name(tif_filename.stem + "-meta.json")
+        visit_filename = tif_filename.with_name(tif_filename.stem + "-visit.gpkg")
+        flood_filename = tif_filename.with_name(tif_filename.stem + "-flood.gpkg")
         if floodmap_folder is not None:
-            floodmap_path = data_folder / "floodmaps" / floodmap_folder / filename
+            abs_floodmap_folder = data_folder / "floodmaps" / floodmap_folder
         else:
-            floodmap_path = data_folder / "floodmaps" / filename
-        floodmap_path.parent.mkdir(exist_ok=True)
+            abs_floodmap_folder = data_folder / "floodmaps"
+        abs_floodmap_folder.mkdir(exist_ok=True)
+        viable_footprint = gff.generate.util.search_result_footprint_intersection(results_group)
         visit_tiles, flood_tiles, s1_export_paths = progressively_grow_floodmaps(
             s1_img_paths,
             rivers_df,
             data_folder,
-            floodmap_path,
+            abs_floodmap_folder / tif_filename,
             flood_model,
             export_s1=export_s1,
             print_freq=200,
+            viable_footprint=viable_footprint,
         )
 
         meta = {
+            "type": "generated",
             "FLOOD": f"{basin_row.ID}",
             "HYBAS_ID": f"{basin_row.HYBAS_ID}",
             "pre2_date": search_results[search_idx[0]][0]["properties"]["startTime"],
             "pre1_date": search_results[search_idx[1]][0]["properties"]["startTime"],
             "post_date": search_results[search_idx[2]][0]["properties"]["startTime"],
-            "floodmap": str(floodmap_path.relative_to(data_folder)),
-            "visit_tiles": [shapely.get_coordinates(t).tolist() for t in visit_tiles],
-            "flood_tiles": [shapely.get_coordinates(t).tolist() for t in flood_tiles],
+            "floodmap": str(tif_filename),
+            "visit_tiles": str(visit_filename),
+            "flood_tiles": str(flood_filename),
         }
         if export_s1:
             meta["s1"] = [str(p.relative_to(data_folder)) for p in s1_export_paths]
@@ -188,9 +210,11 @@ def create_flood_maps(
             print(" No major flooding found.")
             meta["flooding"] = False
             # Try the next set
-            new_search_idx = [idx + 1 for idx in search_idx]
-            if all([i >= 0 and i < len(search_results) for i in new_search_idx]):
-                open_set.append(new_search_idx)
+            next_idx = search_idx[-1] + 1
+            if next_idx < len(search_results):
+                search_idx = gff.generate.util.find_intersection_results(
+                    search_results, next_idx, n_img
+                )
         else:
             print(" Major flooding found.")
             meta["flooding"] = True
@@ -204,11 +228,22 @@ def create_flood_maps(
                         s1_tif.update_tags(1, **desc_dict, polarisation="vv")
                         s1_tif.update_tags(2, **desc_dict, polarisation="vh")
                         s1_tif.descriptions = ["vv", "vh"]
+
+        with (abs_floodmap_folder / meta_filename).open("w") as f:
+            json.dump(meta, f)
+        metas.append(meta)
+
+        kwargs = {"columns": ["geometry"], "geometry": "geometry", "crs": "EPSG:4326"}
+        visit_df = geopandas.GeoDataFrame(visit_tiles, **kwargs)
+        flood_df = geopandas.GeoDataFrame(flood_tiles, **kwargs)
+        visit_df.to_file(abs_floodmap_folder / visit_filename)
+        flood_df.to_file(abs_floodmap_folder / flood_filename)
+        if len(flood_tiles) >= 50:
             break
 
-    with floodmap_path.with_name(floodmap_path.stem + "-meta.json").open("w") as f:
-        json.dump(meta, f)
-    return meta
+    print(f"Completed floodmaps for {cross_term}.")
+
+    return metas
 
 
 def progressively_grow_floodmaps(
@@ -220,6 +255,7 @@ def progressively_grow_floodmaps(
     tile_size: int = 224,
     export_s1: bool = False,
     print_freq: int = 0,
+    viable_footprint: shapely.Geometry = None,
 ):
     """
     First run flood_model along riverway from geom, then expand the search as flooded areas are found.
@@ -237,8 +273,7 @@ def progressively_grow_floodmaps(
     check_tifs_match(inp_tifs)
 
     # Create tile_grid and initial set of tiles
-    viable_footprint = shapely.intersection_all([util.image_footprint(tif) for tif in inp_tifs])
-    tile_grids, viable_footprint = mk_grid(viable_footprint, ref_tif.transform, tile_size)
+    tile_grids = mk_grid(viable_footprint, ref_tif.transform, tile_size)
     tiles = tiles_along_river_within_geom(
         rivers_df, viable_footprint, tile_grids[(0, 0)], ref_tif.crs
     )
@@ -299,6 +334,8 @@ def progressively_grow_floodmaps(
             visited[tile_x, tile_y] = True
             n_visited += 1
             tile_geom = tile_grids[(0, 0)][tile_x, tile_y]
+            if not shapely.contains(viable_footprint, tile_geom):
+                continue
             visit_tiles.append(tile_geom)
             s1_inps, dem, flood_logits = flood_model(inp_tifs, tile_geom)
             s1_inps = [t[0].cpu().numpy() for t in s1_inps]
@@ -329,7 +366,7 @@ def progressively_grow_floodmaps(
             elif check_flooded(flood_cls):
                 flood_tiles.append(tile_geom)
                 n_flooded += 1
-                new_tiles = sel_new_tiles_big_window(tile_x, tile_y, *grid_size, add=5)
+                new_tiles = sel_new_tiles_big_window(tile_x, tile_y, *grid_size, add=3)
                 for tile in new_tiles:
                     if not visited[tile] and (tile not in tiles):
                         tiles.append(tile)
@@ -343,6 +380,13 @@ def progressively_grow_floodmaps(
                     f"{n_permanent:6d} in large bodies of water",
                     f"{n_outside:6d} outside legal bounds",
                 )
+        print(
+            f"{len(tiles):6d} open",
+            f"{n_visited:6d} visited",
+            f"{n_flooded:6d} flooded",
+            f"{n_permanent:6d} in large bodies of water",
+            f"{n_outside:6d} outside legal bounds",
+        )
     if export_s1:
         for s1_tif in s1_tifs:
             s1_tif.close()
@@ -381,16 +425,17 @@ def mk_grid(geom: shapely.Geometry, transform: affine.Affine, gridsize: int):
     # Then translate grid back into CRS so that they align correctly across images
     for grid in grids.values():
         util.convert_affine_inplace(grid, transform, dtype=np.float64)
-    new_geom = shapely.box(xlo, ylo, xhi, yhi)
-    pixel_aligned_geom = shapely.ops.transform(
-        lambda x, y: transform * np.array((x, y), dtype=np.float64), new_geom
-    )
+    # new_geom = shapely.box(xlo, ylo, xhi, yhi)
+    # pixel_aligned_geom = shapely.ops.transform(
+    #     lambda x, y: transform * np.array((x, y), dtype=np.float64), new_geom
+    # )
 
     # Note this only works if all images these grids are applied to have the exact same resolution
-    return grids, pixel_aligned_geom
+    # return grids, pixel_aligned_geom
+    return grids
 
 
-def tiles_along_river_within_geom(rivers_df, geom, tile_grid, crs):
+def tiles_along_river_within_geom(rivers_df, geom, tile_grid, crs, max_tiles=500):
     """
     Select tiles from a tile_grid where the rivers (multiple LINEs) touch a geom (a POLYGON).
     """
@@ -401,11 +446,12 @@ def tiles_along_river_within_geom(rivers_df, geom, tile_grid, crs):
         return []
 
     # Combine river geoms and check for intersection with tile_grid
+    river = river.sort_values("riv_tc_usu")
     intersects = shapely.union_all(river.geometry.values).intersects(tile_grid)
 
     # Return the tile coordinates of intersection as a list
     x, y = intersects.nonzero()
-    return list(zip(x, y))
+    return list(zip(x, y))[:max_tiles]
 
 
 def _ensure_logits(tifs, offset_tile_grid, x, y, flood_model, offset_cache):
@@ -592,16 +638,20 @@ def sel_new_tiles_big_window(tile_x, tile_y, xsize, ysize, add=3):
     return list(itertools.product(range(xlo, xhi), range(ylo, yhi)))
 
 
-def load_rivers(hydroatlas_path: Path, threshold: int = 20000):
+def load_rivers(hydroatlas_path: Path, threshold: int = 100):
     river_path = hydroatlas_path / "filtered_rivers.gpkg"
     if river_path.exists():
         with warnings.catch_warnings(action="ignore"):
-            return geopandas.read_file(river_path, engine="pyogrio")
+            return geopandas.read_file(
+                river_path, engine="pyogrio", use_arrow=True, where=f"riv_tc_usu > {threshold}"
+            )
 
     rivers = []
     for raw_path in hydroatlas_path.glob("**/RiverATLAS_v10_*.shp"):
         with warnings.catch_warnings(action="ignore"):
-            r = geopandas.read_file(raw_path, engine="pyogrio", where=f"riv_tc_usu > {threshold}")
+            r = geopandas.read_file(
+                raw_path, engine="pyogrio", use_arrow=True, where=f"riv_tc_usu > {threshold}"
+            )
         rivers.append(r)
     rivers_df = geopandas.GeoDataFrame(pd.concat(rivers, ignore_index=True), crs=rivers[0].crs)
     rivers_df.to_file(river_path, engine="pyogrio")
@@ -689,6 +739,18 @@ def average_vit_snunet_runner(crs, folder):
     run_flood_model = lambda tifs, geom: run_flood_vit_and_snunet_once(
         tifs, geom, vit_model, snunet_model, folder, geom_crs=crs
     )
+    return run_flood_model
+
+
+def model_runner(name: str, data_folder: Path):
+    if name == "vit":
+        run_flood_model = vit_decoder_runner()
+    elif name == "snunet":
+        run_flood_model = snunet_runner("EPSG:4326", data_folder)
+    elif name == "vit+snunet":
+        run_flood_model = average_vit_snunet_runner("EPSG:4326", data_folder)
+    else:
+        raise NotImplementedError(f"Model named {name} not implemented")
     return run_flood_model
 
 

@@ -12,9 +12,12 @@ import zipfile
 
 import asf_search as asf
 
+import geopandas
+import pandas
 import xarray
 
 from . import util
+from . import constants
 
 
 class URLNotAvailable(Exception):
@@ -235,3 +238,22 @@ def preprocess_s1(data_folder: Path, s1_fname: Path, out_fname: Path):
 
     if not (img_folder / tmp_folder / out_fname).exists():
         raise Exception("Docker run failed for some reason.")
+
+
+def load_dfo(path: Path, for_s1: bool = False):
+    dfo = geopandas.read_file(path / "FloodArchive_region.shp")
+    dfo.geometry = dfo.geometry.buffer(0)
+    classification_types = pandas.read_csv(path / "classifications.csv", quotechar="'")
+
+    # Filter by known flood types we care about
+    dfo = dfo.copy(deep=True)
+    ct = classification_types
+    care_groups = ct[ct["group"].isin(constants.DFO_INCLUDE_TYPES)]
+    care_names = ";".join(care_groups["all_names"]).split(";")
+    dfo = dfo[dfo["MAINCAUSE"].isin(care_names)]
+
+    if for_s1:
+        # Only include 2014 onwards
+        dfo = dfo[dfo["BEGAN"] >= "2014-01-01"]
+
+    return dfo

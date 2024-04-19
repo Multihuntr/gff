@@ -1,4 +1,6 @@
+import collections
 import datetime
+import json
 from pathlib import Path
 
 import geopandas
@@ -9,7 +11,43 @@ import shapely
 import skimage
 import tqdm
 
-import gff.util as util
+
+def basin_distribution(data_folder: Path, basins: geopandas.GeoDataFrame):
+    """
+    Calculates the distribution of basins per continent/climate zone
+
+    returns {
+        <continent_index>: {
+            'total': int,
+            'zones': {
+                <climate_zone_index>: int,
+            }
+        }
+    }
+    """
+    fpath = data_folder / "desired_distribution.json"
+    if fpath.exists():
+        with fpath.open() as f:
+            return json.load(f)
+
+    basins["continent"] = basins.HYBAS_ID.astype(str).str[0].astype(int)
+    counts = (
+        basins[["HYBAS_ID", "continent", "clz_cl_smj"]]
+        .groupby(["continent", "clz_cl_smj"])
+        .count()
+    )
+    result = collections.defaultdict(lambda: {"total": 0, "zones": {}})
+    for (continent, climate_zone), row in counts.iterrows():
+        result[continent]["total"] += row.item()
+        result[continent]["zones"][climate_zone] = row.item()
+    return result
+
+
+def flood_distribution(dfo: geopandas.GeoDataFrame, basins: geopandas.GeoDataFrame):
+    """Calculates the number of floods per basin"""
+    basin_geom = np.array(basins.geometry.values)[:, None]
+    dfo_geom = np.array(dfo.geometry.values)[None, :]
+    return shapely.intersects(basin_geom, dfo_geom).sum(axis=1)
 
 
 def overlap_1d_np(min1, max1, min2, max2):
@@ -92,15 +130,6 @@ def tcs_basins(
     return out
 
 
-INCLUDE_TYPES = [
-    "Cyclone/storm",
-    "Heavy Rain",
-    "Heavy Rain AND Cyclone/storm",
-    "Heavy Rain AND Tides/Surge",
-    "Tides/Surge",
-]
-
-
 def coastal(basins: geopandas.GeoDataFrame):
     # Select basins that drain into the ocean
     return basins[(basins["NEXT_DOWN"] == 0) & (basins["ENDO"] == 0)]
@@ -109,15 +138,7 @@ def coastal(basins: geopandas.GeoDataFrame):
 def basins_by_impact(
     basins: geopandas.GeoDataFrame,
     floods: geopandas.GeoDataFrame,
-    classification_types: pandas.DataFrame,
 ):
-    # Filter by known flood types we care about
-    floods = floods.copy(deep=True)
-    ct = classification_types
-    care_groups = ct[ct["group"].isin(INCLUDE_TYPES)]
-    care_names = ";".join(care_groups["all_names"]).split(";")
-    floods = floods[floods["MAINCAUSE"].isin(care_names)]
-
     # Sort floods by impact
     # What is the value of a life? Approximately 20000 displaced people, apparently
     # (Apologies for my morbid humour)
@@ -126,18 +147,8 @@ def basins_by_impact(
     # Spatial join - only checks if they are touching
     floods = floods.to_crs(basins.crs)
     joined = basins.sjoin(floods, how="inner", rsuffix="flood")
-    joined.sort_values("impact")
+
+    # Sort by impact and potentially affected population
+    joined = joined.sort_values(["impact", "pop_ct_usu"], ascending=False)
 
     return joined
-
-
-def ks_center_of(p: Path):
-    footprint = util.image_footprint(p)
-    footprint = util.convert_crs(footprint, "EPSG:3857", "EPSG:4326")
-    return shapely.centroid(footprint)
-
-
-def ks_by_basin(ks_path, basins):
-    centers = np.array([ks_center_of(path) for path in ks_path.glob("*.tif")])
-    basin_geoms = np.array(basins.geometry.values)
-    assignment = shapely.within(centers[:, None], basin_geoms[None, :])

@@ -5,6 +5,8 @@ from pathlib import Path
 import geopandas
 import pandas as pd
 
+from gff import data_sources
+
 INCLUDE_TYPES = [
     "Cyclone/storm",
     "Heavy Rain",
@@ -20,8 +22,7 @@ def parse_args(argv):
     )
 
     parser.add_argument("hydroatlas_path", type=Path, help="Folder with Basin and River ATLAS")
-    parser.add_argument("flood_database_path", type=Path, help="Dartmouth flood database .shp")
-    parser.add_argument("classifications_csv", type=Path, help="CSV of classification types")
+    parser.add_argument("dfo_path", type=Path, help="Folder of dartmouth flood database")
     parser.add_argument("out_path", type=Path, help=".gpkg file path for output")
     parser.add_argument("--basin_level", type=int, default=8)
     parser.add_argument("--hydroatlas_ver", type=int, default=10)
@@ -62,7 +63,6 @@ def static_filter_basins_df(
 
 def filter_floods_df(
     floods_df: geopandas.GeoDataFrame,
-    classification_types: pd.DataFrame,
     min_dead: int,
     min_displaced: int,
 ):
@@ -72,7 +72,6 @@ def filter_floods_df(
 
     Args:
         floods_df (geopandas.GeoDataFrame): Dataframe of flood events
-        classification_types (pd.DataFrame): Manually grouped types of MAINCAUSE in floods_df
         min_dead (int): Include flood events with at least this many dead
         min_displaced (int): Include flood events with at least this many displaced
 
@@ -81,12 +80,6 @@ def filter_floods_df(
     """
     # Filter by enough people affected
     query = (floods_df["DEAD"] >= min_dead) | (floods_df["DISPLACED"] >= min_displaced)
-
-    # Filter by known flood types we care about
-    ct = classification_types
-    care_groups = ct[ct["group"].isin(INCLUDE_TYPES)]
-    care_names = ";".join(care_groups["all_names"]).split(";")
-    query &= floods_df["MAINCAUSE"].isin(care_names)
 
     return floods_df[query]
 
@@ -121,12 +114,9 @@ def main(args):
     basins_df = static_filter_basins_df(basins_df, args.min_river_vol, args.min_population)
 
     print("Loading floods...")
-    floods_df = geopandas.read_file(args.flood_database_path, engine="pyogrio")
+    floods_df = data_sources.load_dfo(args.dfo_path)
     print(" - filtering floods...")
-    classification_types = pd.read_csv(args.classifications_csv, quotechar="'")
-    floods_df = filter_floods_df(
-        floods_df, classification_types, args.min_dead, args.min_displaced
-    )
+    floods_df = filter_floods_df(floods_df, args.min_dead, args.min_displaced)
 
     print("Cross-checking floods with basins...")
     basin_floods = find_overlaps(basins_df, floods_df)

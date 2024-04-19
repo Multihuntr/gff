@@ -103,9 +103,13 @@ def mk_pixel_overlap_mask(geom, bounds):
     return shapely.area(intersections)
 
 
-def convert_crs(shp: shapely.Geometry, _from: str, _to: str):
+def convert_crs(shp: Union[shapely.Geometry, np.ndarray], _from: str, _to: str):
     project = pyproj.Transformer.from_crs(_from, _to, always_xy=True).transform
-    return shapely.ops.transform(project, shp)
+    if isinstance(shp, shapely.Geometry):
+        return shapely.ops.transform(project, shp)
+    else:
+        op = lambda xy: np.stack(project(xy[..., 0], xy[..., 1]), axis=-1)
+        return convert_shp_inplace(shp.copy(), op)
 
 
 def convert_affine_inplace(shp, transform: affine.Affine, dtype=np.float64):
@@ -185,7 +189,7 @@ def get_tiles_batched(imgs, geoms: shapely.Geometry, geom_in_px: bool = False):
     return inps
 
 
-def tile_mask_for_basin(in_tiles, basins_df):
+def tile_mask_for_basin(in_tiles: list[np.ndarray], basins_df: geopandas.GeoDataFrame):
     """
     Create a mask to exclude tiles outside the majority basin
     (which basin is the majority basin is also calculated here)

@@ -328,18 +328,19 @@ def progressively_grow_floodmaps(
         n_flooded = 0
         n_permanent = 0
         n_outside = 0
-        while len(tiles) > 0:
+        while len(tiles) > 0 and len(visit_tiles) < 2500:
             # Grab a tile and get logits
             tile_x, tile_y = tiles.pop(0)
             visited[tile_x, tile_y] = True
             n_visited += 1
             tile_geom = tile_grids[(0, 0)][tile_x, tile_y]
-            if not shapely.contains(viable_footprint, tile_geom):
-                continue
             visit_tiles.append(tile_geom)
+            if not shapely.contains(viable_footprint, tile_geom):
+                n_outside += 1
+                continue
             s1_inps, dem, flood_logits = flood_model(inp_tifs, tile_geom)
             s1_inps = [t[0].cpu().numpy() for t in s1_inps]
-            if not s1_preprocess_edge_heuristic(s1_inps) or flood_logits is None:
+            if flood_logits is None:
                 n_outside += 1
                 continue
 

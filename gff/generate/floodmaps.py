@@ -126,6 +126,7 @@ def create_flood_maps(
     export_s1=True,
     n_img=3,
     floodmap_folder=None,
+    search_idxs=None,
 ):
     """
     Creates flood maps for a single basin x flood shape by starting along rivers
@@ -144,19 +145,14 @@ def create_flood_maps(
     # How to choose combinations of S1? Who knows? *shrug*
     # Pick the first triplet, then, if no flooding, choose the next triplet
 
-    # Determine the first S1 image after the flood began
-    if isinstance(basin_row["BEGAN"], str):
-        start_ts = datetime.datetime.fromisoformat(basin_row["BEGAN"]).timestamp()
-    else:
-        start_ts = basin_row["BEGAN"].to_pydatetime().timestamp()
-    search_idx = gff.generate.util.initial_search_floodmap_idx(search_results, start_ts, n_img)
-    if search_idx is None:
-        print("No overlap between S1 images; exiting early. No floodmaps generated.")
-        return
+    if search_idxs is None:
+        search_idxs = gff.generate.util.find_intersecting_tuplets(search_results, basin_row, n_img)
+        if search_idxs is None:
+            print("No overlap between S1 images; exiting early. No floodmaps generated.")
+            return
 
-    meta = None
     metas = []
-    while search_idx is not None:
+    for search_idx in search_idxs:
         results_group = [search_results[i] for i in search_idx]
 
         s1_img_paths = []
@@ -209,25 +205,19 @@ def create_flood_maps(
         if len(flood_tiles) < 50:
             print(" No major flooding found.")
             meta["flooding"] = False
-            # Try the next set
-            next_idx = search_idx[-1] + 1
-            if next_idx < len(search_results):
-                search_idx = gff.generate.util.find_intersection_results(
-                    search_results, next_idx, n_img
-                )
         else:
             print(" Major flooding found.")
             meta["flooding"] = True
 
-            if export_s1:
-                for i, s1_export_path in enumerate(s1_export_paths):
-                    with rasterio.open(s1_export_path, "r+") as s1_tif:
-                        desc_keys = ["flightDirection", "pathNumber", "startTime", "orbit"]
-                        props = search_results[search_idx[i]][0]["properties"]
-                        desc_dict = {k: props[k] for k in desc_keys}
-                        s1_tif.update_tags(1, **desc_dict, polarisation="vv")
-                        s1_tif.update_tags(2, **desc_dict, polarisation="vh")
-                        s1_tif.descriptions = ["vv", "vh"]
+        if export_s1:
+            for i, s1_export_path in enumerate(s1_export_paths):
+                with rasterio.open(s1_export_path, "r+") as s1_tif:
+                    desc_keys = ["flightDirection", "pathNumber", "startTime", "orbit"]
+                    props = search_results[search_idx[i]][0]["properties"]
+                    desc_dict = {k: props[k] for k in desc_keys}
+                    s1_tif.update_tags(1, **desc_dict, polarisation="vv")
+                    s1_tif.update_tags(2, **desc_dict, polarisation="vh")
+                    s1_tif.descriptions = ["vv", "vh"]
 
         with (abs_floodmap_folder / meta_filename).open("w") as f:
             json.dump(meta, f)
@@ -256,6 +246,7 @@ def progressively_grow_floodmaps(
     export_s1: bool = False,
     print_freq: int = 0,
     viable_footprint: shapely.Geometry = None,
+    max_tiles: int = 2500,
 ):
     """
     First run flood_model along riverway from geom, then expand the search as flooded areas are found.
@@ -273,14 +264,19 @@ def progressively_grow_floodmaps(
     check_tifs_match(inp_tifs)
 
     # Create tile_grid and initial set of tiles
-    tile_grids = mk_grid(viable_footprint, ref_tif.transform, tile_size)
+    tile_grids, footprint_box = mk_grid(viable_footprint, ref_tif.transform, tile_size)
     tiles = tiles_along_river_within_geom(
-        rivers_df, viable_footprint, tile_grids[(0, 0)], ref_tif.crs
+        rivers_df,
+        viable_footprint,
+        tile_grids[(0, 0)],
+        ref_tif.crs,
+        min_river_size=500,
+        max_tiles=200,
     )
     grid_size = tile_grids[(0, 0)].shape
     # Expand a small area around the river tiles
     for tile_x, tile_y in tiles.copy():
-        new_tiles = sel_new_tiles_big_window(tile_x, tile_y, *grid_size, add=3)
+        new_tiles = sel_new_tiles_big_window(tile_x, tile_y, *grid_size, add=2)
         for tile in new_tiles:
             if tile not in tiles:
                 tiles.append(tile)
@@ -288,7 +284,7 @@ def progressively_grow_floodmaps(
     offset_cache = {(0, 1): {}, (1, 0): {}, (1, 1): {}}
 
     # Rasterio profile handling
-    outxlo, _, _, outyhi = viable_footprint.bounds
+    outxlo, _, _, outyhi = footprint_box.bounds
     t = ref_tif.transform
     new_transform = rasterio.transform.from_origin(outxlo, outyhi, t[0], -t[4])
     floodmap_nodata = 255
@@ -306,9 +302,9 @@ def progressively_grow_floodmaps(
     if export_s1:
         s1_profile = {
             **ref_tif.profile,
-            "COMPRESS": "DEFLATE",
-            "ZLEVEL": 1,
-            "PREDICTOR": 2,
+            "COMPRESS": "LERC",
+            "MAX_Z_ERROR": 0.0001,
+            "INTERLEAVE": "BAND",
             "transform": new_transform,
             "width": tile_grids[0, 0].shape[0] * tile_size,
             "height": tile_grids[0, 0].shape[1] * tile_size,
@@ -328,7 +324,7 @@ def progressively_grow_floodmaps(
         n_flooded = 0
         n_permanent = 0
         n_outside = 0
-        while len(tiles) > 0 and len(visit_tiles) < 2500:
+        while len(tiles) > 0 and len(visit_tiles) < max_tiles:
             # Grab a tile and get logits
             tile_x, tile_y = tiles.pop(0)
             visited[tile_x, tile_y] = True
@@ -340,7 +336,7 @@ def progressively_grow_floodmaps(
                 continue
             s1_inps, dem, flood_logits = flood_model(inp_tifs, tile_geom)
             s1_inps = [t[0].cpu().numpy() for t in s1_inps]
-            if flood_logits is None:
+            if not s1_preprocess_edge_heuristic(s1_inps) or flood_logits is None:
                 n_outside += 1
                 continue
 
@@ -413,7 +409,15 @@ def mk_grid(geom: shapely.Geometry, transform: affine.Affine, gridsize: int):
 
     # So that you can create a grid that is the correct size in pixel coordinates
     xlo, ylo, xhi, yhi = geom_in_px.bounds
-    xlo, ylo, xhi, yhi = math.ceil(xlo), math.ceil(ylo), math.floor(xhi), math.floor(yhi)
+    # Since the geom potentially describes a validity boundary, and the grids are not
+    # guaranteed to align with every other raster, pull in the boundary by one pixel
+    # This ensures that resampling always has at least one pixel to play with
+    xlo, ylo, xhi, yhi = (
+        math.ceil(xlo) + 1,
+        math.ceil(ylo) + 1,
+        math.floor(xhi) - 1,
+        math.floor(yhi) - 1,
+    )
     w_px, h_px = (xhi - xlo), (yhi - ylo)
     s = gridsize
     grids = {
@@ -426,17 +430,19 @@ def mk_grid(geom: shapely.Geometry, transform: affine.Affine, gridsize: int):
     # Then translate grid back into CRS so that they align correctly across images
     for grid in grids.values():
         util.convert_affine_inplace(grid, transform, dtype=np.float64)
-    # new_geom = shapely.box(xlo, ylo, xhi, yhi)
-    # pixel_aligned_geom = shapely.ops.transform(
-    #     lambda x, y: transform * np.array((x, y), dtype=np.float64), new_geom
-    # )
+    # The geom is then aligned to the pixels in the reference tif to ensure no resampling
+    new_geom = shapely.box(xlo, ylo, xhi, yhi)
+    pixel_aligned_geom = shapely.ops.transform(
+        lambda x, y: transform * np.array((x, y), dtype=np.float64), new_geom
+    )
 
     # Note this only works if all images these grids are applied to have the exact same resolution
-    # return grids, pixel_aligned_geom
-    return grids
+    return grids, pixel_aligned_geom
 
 
-def tiles_along_river_within_geom(rivers_df, geom, tile_grid, crs, max_tiles=500):
+def tiles_along_river_within_geom(
+    rivers_df, geom, tile_grid, crs, min_river_size=None, max_tiles=500
+):
     """
     Select tiles from a tile_grid where the rivers (multiple LINEs) touch a geom (a POLYGON).
     """
@@ -447,6 +453,8 @@ def tiles_along_river_within_geom(rivers_df, geom, tile_grid, crs, max_tiles=500
         return []
 
     # Combine river geoms and check for intersection with tile_grid
+    if min_river_size is not None:
+        river = river[river["riv_tc_usu"] > min_river_size]
     river = river.sort_values("riv_tc_usu")
     intersects = shapely.union_all(river.geometry.values).intersects(tile_grid)
 
@@ -675,9 +683,9 @@ def run_snunet_once(
     except data_sources.URLNotAvailable:
         return inps, None, None
     dem_fine = util.resample_xr(dem_coarse, geom_4326.bounds, inps[0].shape[2:])
-    dem_th = dem_fine.band_data.values
-    out = model(inps, dem=dem_th)[0].cpu().numpy()
-    return inps, dem_th, out
+    dem_np = dem_fine.band_data.values
+    out = model(inps, dem=dem_np)[0].cpu().numpy()
+    return inps, dem_np, out
 
 
 def run_flood_vit_once(

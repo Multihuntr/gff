@@ -5,6 +5,7 @@ KUROSIWO_BG_CLASS = KUROSIWO_CLASS_NAMES.index("background")
 KUROSIWO_PW_CLASS = KUROSIWO_CLASS_NAMES.index("permanent water")
 KUROSIWO_FLOOD_CLASS = KUROSIWO_CLASS_NAMES.index("flood")
 KUROSIWO_S1_NAMES = ["pre2", "pre1", "post"]
+LAST_PRE_S1_NAME = KUROSIWO_S1_NAMES[-2]
 FLOODMAP_BLOCK_SIZE = 224
 # For some reason PACKBITS wasn't compressing very well.
 # Disk size scaled by regions of nodata.
@@ -55,4 +56,32 @@ DFO_INCLUDE_TYPES = [
     "Heavy Rain AND Cyclone/storm",
     "Heavy Rain AND Tides/Surge",
     "Tides/Surge",
+]
+
+ERA5L_BANDS = [
+    "dewpoint_temperature_2m",
+    "temperature_2m",
+    "volumetric_soil_water_layer_1",
+    "volumetric_soil_water_layer_2",
+    "volumetric_soil_water_layer_3",
+    "volumetric_soil_water_layer_4",
+    "surface_net_solar_radiation_sum",
+    "surface_net_thermal_radiation_sum",
+    "u_component_of_wind_10m",
+    "v_component_of_wind_10m",
+    "surface_pressure",
+    "total_precipitation_sum",
+    "snow_depth_water_equivalent",
+    "potential_evaporation_sum",
+]
+ERA5_BANDS = [
+    "mean_2m_air_temperature",
+    "minimum_2m_air_temperature",
+    "maximum_2m_air_temperature",
+    "dewpoint_2m_temperature",
+    "total_precipitation",
+    "surface_pressure",
+    "mean_sea_level_pressure",
+    "u_component_of_wind_10m",
+    "v_component_of_wind_10m",
 ]

@@ -61,7 +61,7 @@ def main(args):
         if args.group_by_date:
             groups[d].append((p.parent, info))
         else:
-            groups[(d, info["aoiid"])].append((p.parent, info, geom))
+            groups[(d, info["actid"], info["aoiid"])].append((p.parent, info, geom))
         if i % 1000 == 0:
             print(f"{i} tiles processed | {len(groups)} groups found", end="\r")
     print(f"{i} tiles processed | {len(groups)} groups found")
@@ -80,8 +80,8 @@ def main(args):
             d = k
             fname = f"{d.strftime(d_fmt)}.tif"
         else:
-            (d, aoiid) = k
-            fname = f"{d.strftime(d_fmt)}_{aoiid}.tif"
+            (d, actid, aoiid) = k
+            fname = f"{actid}_{aoiid}_{d.strftime(d_fmt)}.tif"
         fname = Path(fname)
         geoms_fname = fname.with_name(fname.stem + "-geoms.gpkg")
         meta_fname = fname.with_name(fname.stem + "-meta.json")
@@ -118,6 +118,8 @@ def main(args):
         meta = {
             "type": "kurosiwo",
             "HYBAS_ID_4": hybas_id.item(),
+            "actid": infos[0]["actid"],
+            "aoiid": infos[0]["aoiid"],
             "pre2_date": ks_to_isodate(infos[0]["sources"]["SL2"]["source_date"]),
             "pre1_date": ks_to_isodate(infos[0]["sources"]["SL1"]["source_date"]),
             "post_date": ks_to_isodate(infos[0]["sources"]["MS1"]["source_date"]),
@@ -132,8 +134,8 @@ def main(args):
 
     # Remove aois outside the lvl4 basin the group was mostly assigned to
     return
-    # TODO: Allow if far enough away; disallow if within 3 days of each other
     # NOTE: I have manually checked all of kurosiwo labels, and this isn't necessary
+    # TODO: Allow if far enough away; disallow if within x days of each other
     print("Checking/removing aois across basin boundaries")
     if not args.group_by_date:
         for d, v in group_basin_counts.items():

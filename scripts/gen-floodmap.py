@@ -65,8 +65,7 @@ def main(args):
     basins08_fname = f"BasinATLAS_v10_lev08.shp"
     basins08_df = geopandas.read_file(basin_path / basins08_fname, engine="pyogrio")
     dfo = gff.data_sources.load_dfo(args.dfo_path, for_s1=True)
-    coastal_basins = gff.generate.basins.coastal(basins08_df)
-    basin_floods = gff.generate.basins.basins_by_impact(coastal_basins, dfo)
+    basin_floods = gff.generate.basins.coastal_basin_x_floods(basins08_df, dfo)
     is_flood = basin_floods["ID"] == args.flood_id
     is_hybas = basin_floods["HYBAS_ID"] == args.hybas_id
     basin_row = basin_floods.loc[is_flood & is_hybas].iloc[0]

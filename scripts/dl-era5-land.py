@@ -36,6 +36,8 @@ import rasterio
 import rasterio.mask
 import rasterio.merge
 
+import gff.constants
+
 ssl_lock = threading.Lock()
 ram_lock = threading.Lock()
 task_times = []
@@ -250,45 +252,20 @@ START_DATE = "2014-01-01"  # Format: YYYY-MM-DD
 END_DATE = "2023-01-01"  # Format: YYYY-MM-DD
 YEAR_RANGE = range(2014, 2024)
 MONTH_RANGE = range(1, 13)
-ERA5L_BANDS = [
-    "dewpoint_temperature_2m",
-    "temperature_2m",
-    "volumetric_soil_water_layer_1",
-    "volumetric_soil_water_layer_2",
-    "volumetric_soil_water_layer_3",
-    "volumetric_soil_water_layer_4",
-    "surface_net_solar_radiation_sum",
-    "surface_net_thermal_radiation_sum",
-    "u_component_of_wind_10m",
-    "v_component_of_wind_10m",
-    "surface_pressure",
-    "total_precipitation_sum",
-    "snow_depth_water_equivalent",
-    "potential_evaporation_sum",
-]
-ERA5_BANDS = [
-    "mean_2m_air_temperature",
-    "minimum_2m_air_temperature",
-    "maximum_2m_air_temperature",
-    "dewpoint_2m_temperature",
-    "total_precipitation",
-    "surface_pressure",
-    "mean_sea_level_pressure",
-    "u_component_of_wind_10m",
-    "v_component_of_wind_10m",
-]
 SANS_ANTARCTICA = shapely.polygons([[[-179, 85], [179, 85], [179, -60], [-179, -60]]])
 
 
 def main(args, gservice):
     if not (args.not_land):
-        band_names = ERA5L_BANDS
+        band_names = gff.constants.ERA5L_BANDS
         prefix = "era5-land"
-        dataset = ee.ImageCollection("ECMWF/ERA5_LAND/DAILY_AGGR").select(*ERA5L_BANDS)
+        dataset = ee.ImageCollection("ECMWF/ERA5_LAND/DAILY_AGGR").select(
+            *gff.constants.ERA5L_BANDS
+        )
     else:
-        band_names = ERA5_BANDS
+        band_names = gff.constants.ERA5_BANDS
         prefix = "era5"
-        dataset = ee.ImageCollection("ECMWF/ERA5/DAILY").select(*ERA5_BANDS)
+        dataset = ee.ImageCollection("ECMWF/ERA5/DAILY").select(*gff.constants.ERA5_BANDS)
 
     _download_locally_partial = functools.partial(
         download_locally,

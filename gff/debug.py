@@ -30,8 +30,20 @@ def save_as_geojson(shps, fname="debug.geojson"):
         "name": "test",
         "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:OGC:1.3:CRS84"}},
         "features": [
-            {"type": "Feature", "geometry": eval(shapely.to_geojson(s))} for s in shps.flatten()
+            {
+                "type": "Feature",
+                "geometry": eval(shapely.to_geojson(s)),
+                "properties": {"index": i},
+            }
+            for i, s in enumerate(shps.flatten())
         ],
     }
     with open(fname, "w") as f:
         json.dump(geojson, f)
+
+
+def get_search_results(data_folder, k):
+    import sqlite3
+
+    index = sqlite3.connect(data_folder / "s1" / "index.db")
+    return index.execute("SELECT json FROM results WHERE key LIKE ?", (k,)).fetchall()

@@ -43,11 +43,52 @@ def basin_distribution(data_folder: Path, basins: geopandas.GeoDataFrame):
     return result
 
 
-def flood_distribution(dfo: geopandas.GeoDataFrame, basins: geopandas.GeoDataFrame):
-    """Calculates the number of floods per basin"""
+def overlaps_at_least(a, b, threshold: float = 0.3):
+    overlaps = shapely.area(shapely.intersection(a, b)) / shapely.area(a)
+    return overlaps > threshold
+
+
+def flood_distribution(
+    dfo: geopandas.GeoDataFrame,
+    basins: geopandas.GeoDataFrame,
+    overlap_threshold: float = 0.3,
+    cache_path: Path = None,
+):
+    """Calculates the number of floods per continent/climate zone"""
+    if cache_path is not None and cache_path.exists():
+        with open(cache_path) as f:
+            load_distr = json.load(f)
+        # Keys have been typed to strings; return to ints
+        out_distr = {}
+        for k, v in load_distr.items():
+            out_distr[int(k)] = {
+                "total": v["total"],
+                "zones": {int(kz): vz for kz, vz in v["zones"].items()},
+            }
+        return out_distr
+    # Add continent column
+    basins["continent"] = basins.HYBAS_ID.astype(str).str[0].astype(int)
+
+    # Add n_floods column
     basin_geom = np.array(basins.geometry.values)[:, None]
     dfo_geom = np.array(dfo.geometry.values)[None, :]
-    return shapely.intersects(basin_geom, dfo_geom).sum(axis=1)
+    basins["n_floods"] = overlaps_at_least(basin_geom, dfo_geom, overlap_threshold).sum(axis=1)
+
+    # Add up floods
+    counts = (
+        basins[["HYBAS_ID", "continent", "clz_cl_smj", "n_floods"]]
+        .groupby(["continent", "clz_cl_smj"])
+        .agg({"n_floods": "sum"})
+    )
+    # Store distribution as dictionary
+    result = collections.defaultdict(lambda: {"total": 0, "zones": {}})
+    for (continent, climate_zone), row in counts.iterrows():
+        result[continent]["total"] += row.item()
+        result[continent]["zones"][climate_zone] = row.item()
+    if cache_path is not None:
+        with open(cache_path, "w") as f:
+            json.dump(result, f)
+    return result
 
 
 def overlap_1d_np(min1, max1, min2, max2):
@@ -59,10 +100,10 @@ def tcs_basins(
     basins: geopandas.GeoDataFrame,
     tcs: geopandas.GeoDataFrame,
     tc_path: Path,
-    out_fpath: str,
+    out_fpath: Path,
 ):
     if out_fpath.exists():
-        return pandas.read_csv(out_fpath)
+        return geopandas.read_file(out_fpath)
 
     dfofmtstr = "%Y-%m-%d"
     tcfmtstr = "%Y%m%d%H"
@@ -73,6 +114,7 @@ def tcs_basins(
     def tc_to_ts(x):
         return datetime.datetime.strptime(str(x), tcfmtstr).timestamp()
 
+    dfo_orig = dfo.copy()
     dfo["BEGAN"] = dfo["BEGAN"].apply(dfo_to_ts)
     dfo["ENDED"] = dfo["ENDED"].apply(dfo_to_ts)
     tcs["FIRSTTRACKDATE"] = tcs["FIRSTTRACKDATE"].apply(tc_to_ts)
@@ -124,31 +166,37 @@ def tcs_basins(
     n_covered = len(set(tcs_covered))
     print(f"Out of {len(all_tc)}")
     print(f"Tropical cyclones overlapping DFO: {n_covered}")
-    columns = ["FLOOD_ID", "HYBAS_ID", "BASIN", "YEAR", "STORMNAME"]
-    out = pandas.DataFrame(coincide, columns=columns)
-    out.to_csv(out_fpath, index=False)
+    columns = ["ID", "HYBAS_ID", "BASIN", "YEAR", "STORMNAME"]
+    tc_index = pandas.DataFrame(coincide, columns=columns)
+    w_basin = pandas.merge(basins, tc_index, how="inner", on="HYBAS_ID")
+    dfo_no_geom = pandas.DataFrame(dfo_orig.drop(columns="geometry"))
+    out = pandas.merge(w_basin, dfo_no_geom, how="inner", on="ID")
+    out.to_file(out_fpath)
     return out
 
 
-def coastal(basins: geopandas.GeoDataFrame):
-    # Select basins that drain into the ocean
-    return basins[(basins["NEXT_DOWN"] == 0) & (basins["ENDO"] == 0)]
-
-
-def basins_by_impact(
-    basins: geopandas.GeoDataFrame,
-    floods: geopandas.GeoDataFrame,
+def coastal_basin_x_floods(
+    basins: geopandas.GeoDataFrame, floods: geopandas.GeoDataFrame, flow_threshold: int = 100
 ):
-    # Sort floods by impact
-    # What is the value of a life? Approximately 20000 displaced people, apparently
-    # (Apologies for my morbid humour)
-    floods["impact"] = floods["DEAD"] * 20000 + floods["DISPLACED"]
+    # Filter by anything more than a tiny creek
+    basins = basins[basins["riv_tc_usu"] > flow_threshold]
+
+    # Select basins that drain into the ocean
+    basins = basins[(basins["NEXT_DOWN"] == 0) & (basins["ENDO"] == 0)]
 
     # Spatial join - only checks if they are touching
     floods = floods.to_crs(basins.crs)
     joined = basins.sjoin(floods, how="inner", rsuffix="flood")
+    return joined
+
+
+def by_impact(w_flood: geopandas.GeoDataFrame):
+    # Sort floods by impact
+    # What is the value of a life? Approximately 20000 displaced people, apparently
+    # (Apologies for my morbid humour)
+    w_flood["impact"] = w_flood["DEAD"] * 20000 + w_flood["DISPLACED"]
 
     # Sort by impact and potentially affected population
-    joined = joined.sort_values(["impact", "pop_ct_usu"], ascending=False)
+    w_flood = w_flood.sort_values(["impact", "pop_ct_usu"], ascending=False)
 
-    return joined
+    return w_flood

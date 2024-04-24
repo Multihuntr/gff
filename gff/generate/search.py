@@ -79,7 +79,7 @@ def get_search_results(index: sqlite3.Connection, shp: geopandas.GeoSeries):
             break
         except json.JSONDecodeError:
             backoff = 30
-            print("Search failed. Retrying in {backoff}s")
+            print(f"Search failed. Retrying in {backoff}s")
             time.sleep(backoff)
     else:
         raise Exception("asf_search unavailable")

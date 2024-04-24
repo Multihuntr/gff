@@ -274,12 +274,18 @@ def progressively_grow_floodmaps(
         max_tiles=200,
     )
     grid_size = tile_grids[(0, 0)].shape
+    if len(tiles) == 0:
+        # This can happen if there's no rivers visible in viable_footprint.
+        # So, just use a square in the center.
+        gw, gh = grid_size
+        tiles.extend(sel_new_tiles_big_window(gw // 2, gh // 2, *grid_size, add=3))
     # Expand a small area around the river tiles
     for tile_x, tile_y in tiles.copy():
         new_tiles = sel_new_tiles_big_window(tile_x, tile_y, *grid_size, add=2)
         for tile in new_tiles:
             if tile not in tiles:
                 tiles.append(tile)
+
     visited = np.zeros_like(tile_grids[(0, 0)]).astype(bool)
     offset_cache = {(0, 1): {}, (1, 0): {}, (1, 1): {}}
 

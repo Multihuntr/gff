@@ -274,6 +274,11 @@ def main(args):
                     search_idxs=safe_tuplets,
                 )
 
+                meta_fpaths = gff.generate.floodmaps.floodmap_meta_fpaths(
+                    args.data_path, key, name
+                )
+                for meta_fpath in meta_fpaths:
+                    gff.generate.floodmaps.remove_tiles_outside(meta_fpath, basins04_df)
             else:
                 print(f"    {name} floodmaps already exist.")
 

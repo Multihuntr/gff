@@ -395,6 +395,33 @@ def progressively_grow_floodmaps(
     return visit_tiles, flood_tiles, s1_fpaths
 
 
+def remove_tiles_outside(meta_path: Path, basins_df: geopandas.GeoDataFrame):
+    with meta_path.open() as f:
+        meta = json.load(f)
+
+    v_path = meta_path.parent / meta["visit_tiles"]
+    f_path = meta_path.parent / meta["flood_tiles"]
+    visit_tiles = geopandas.read_file(v_path, engine="pyogrio", use_arrow=True)
+    flood_tiles = geopandas.read_file(f_path, engine="pyogrio", use_arrow=True)
+    _, visit_mask = util.tile_mask_for_basin(visit_tiles.geometry, basins_df)
+    _, flood_mask = util.tile_mask_for_basin(flood_tiles.geometry, basins_df)
+
+    # Write nodata to tiles outside majority basin
+    with rasterio.open(meta_path.parent / meta["floodmap"], "r+") as tif:
+        for tile in visit_tiles.geometry.values[visit_mask]:
+            tile_geom = shapely.Polygon(tile)
+            window = util.shapely_bounds_to_rasterio_window(tile_geom.bounds, tif.transform)
+            (yhi, ylo), (xhi, xlo) = window
+            tif.write(
+                np.full((tif.count, abs(yhi - ylo), abs(xhi - xlo)), tif.nodata), window=window
+            )
+
+    visit_tiles = visit_tiles[~visit_mask]
+    flood_tiles = flood_tiles[~flood_mask]
+    visit_tiles.to_file(v_path, engine="pyogrio")
+    flood_tiles.to_file(f_path, engine="pyogrio")
+
+
 def major_upstream_riverways(basins_df, start, bounds, threshold=20000):
     """Creates a shape that covers all the major upstream riverways within bounds"""
     upstream = util.get_upstream_basins(basins_df, start["HYBAS_ID"])

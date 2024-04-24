@@ -1,7 +1,8 @@
 import datetime
+import json
 import math
 from pathlib import Path
-from typing import Union
+from typing import Sequence, Union
 
 import affine
 import geopandas
@@ -30,7 +31,7 @@ def rounded_bounds(arg, outer=True):
         raise ValueError("Bounds must be 4-tuple, 1D np.array or a shapely.Geometry")
 
 
-def shapely_bounds_to_rasterio_window(bounds, transform=None):
+def shapely_bounds_to_rasterio_window(bounds, transform=None, align=True):
     xlo, ylo, xhi, yhi = bounds
 
     # If transform is provided, assume bounds are in CRS and convert to pixel-space
@@ -45,7 +46,8 @@ def shapely_bounds_to_rasterio_window(bounds, transform=None):
         ylo, yhi = yhi, ylo
 
     # Rasterio write doesn't use resampling nearest, so floating-point errors will cause off-by-one
-    xlo, ylo, xhi, yhi = round(xlo), round(ylo), round(xhi), round(yhi)
+    if align:
+        xlo, ylo, xhi, yhi = round(xlo), round(ylo), round(xhi), round(yhi)
 
     return ((ylo, yhi), (xlo, xhi))
 
@@ -156,9 +158,9 @@ def get_tile(
         tif = p
 
     if bounds is not None and not bounds_in_px:
-        window = shapely_bounds_to_rasterio_window(bounds, tif.transform)
+        window = shapely_bounds_to_rasterio_window(bounds, tif.transform, align=False)
     elif (bounds is not None and bounds_in_px) or bounds_px is not None:
-        window = shapely_bounds_to_rasterio_window(bounds_px)
+        window = shapely_bounds_to_rasterio_window(bounds_px, align=False)
     else:
         raise Exception("Either bounds or bounds_px must have a value")
 
@@ -189,7 +191,9 @@ def get_tiles_batched(imgs, geoms: shapely.Geometry, geom_in_px: bool = False):
     return inps
 
 
-def tile_mask_for_basin(in_tiles: list[np.ndarray], basins_df: geopandas.GeoDataFrame):
+def tile_mask_for_basin(
+    in_tiles: Sequence[Union[np.ndarray, shapely.Geometry]], basins_df: geopandas.GeoDataFrame
+):
     """
     Create a mask to exclude tiles outside the majority basin
     (which basin is the majority basin is also calculated here)

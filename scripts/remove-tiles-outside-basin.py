@@ -27,26 +27,7 @@ def main(args):
     basins_df = geopandas.read_file(basin_path, engine="pyogrio")
 
     for meta_path in (args.data_path / "floodmaps").glob("*-meta.json"):
-        with meta_path.open() as f:
-            meta = json.load(f)
-
-        visit_tiles = np.array(meta["visit_tiles"])
-        flood_tiles = np.array(meta["flood_tiles"])
-        _, visit_mask = util.tile_mask_for_basin(visit_tiles, basins_df)
-        _, flood_mask = util.tile_mask_for_basin(flood_tiles, basins_df)
-
-        # Write nodata to tiles outside majority basin
-        with rasterio.open(args.data_path / meta["floodmap"], "r+") as tif:
-            for tile in visit_tiles[visit_mask]:
-                tile_geom = shapely.Polygon(tile)
-                window = util.shapely_bounds_to_rasterio_window(tile_geom.bounds, tif.transform)
-                (yhi, ylo), (xhi, xlo) = window
-                tif.write(
-                    np.full((tif.count, abs(yhi - ylo), abs(xhi - xlo)), tif.nodata), window=window
-                )
-
-        meta["visit_tiles"] = visit_tiles[~visit_mask]
-        meta["flood_tiles"] = flood_tiles[~flood_mask]
+        util.remove_tiles_outside(meta_path, basins_df)
 
 
 if __name__ == "__main__":

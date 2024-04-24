@@ -1,6 +1,7 @@
 import datetime
 import json
 import sqlite3
+import time
 
 import asf_search as asf
 import geopandas
@@ -65,14 +66,23 @@ def get_search_results(index: sqlite3.Connection, shp: geopandas.GeoSeries):
     start_date = datetime.datetime.fromisoformat(shp["BEGAN"])
     end_date = datetime.datetime.fromisoformat(shp["ENDED"])
 
-    buffer = datetime.timedelta(days=60)
-    search_results = asf.geo_search(
-        intersectsWith=shp.geometry.convex_hull.wkt,
-        platform=asf.PLATFORM.SENTINEL1,
-        processingLevel=asf.PRODUCT_TYPE.AMPLITUDE_GRD,
-        start=start_date - buffer,
-        end=end_date,
-    )
+    for x in range(3):
+        try:
+            buffer = datetime.timedelta(days=60)
+            search_results = asf.geo_search(
+                intersectsWith=shp.geometry.convex_hull.wkt,
+                platform=asf.PLATFORM.SENTINEL1,
+                processingLevel=asf.PRODUCT_TYPE.AMPLITUDE_GRD,
+                start=start_date - buffer,
+                end=end_date,
+            )
+            break
+        except json.JSONDecodeError:
+            backoff = 30
+            print("Search failed. Retrying in {backoff}s")
+            time.sleep(backoff)
+    else:
+        raise Exception("asf_search unavailable")
     # Only include processing level GRD_HD
     only_grd = [r for r in search_results if r.properties["processingLevel"] == "GRD_HD"]
     only_grd.sort(key=lambda r: r.properties["startTime"])

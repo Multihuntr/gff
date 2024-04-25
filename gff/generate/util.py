@@ -29,7 +29,7 @@ def first_index_result_after(search_results: list[dict], row: geopandas.GeoSerie
 
 
 def find_intersecting_tuplets(
-    search_results: list[dict], basin_row: geopandas.GeoSeries, n_img: int
+    search_results: list[dict], basin_row: geopandas.GeoSeries, n_img: int, min_size: float = 0
 ):
     """
     Finds all sets of S1 images that overlap with each other
@@ -38,14 +38,16 @@ def find_intersecting_tuplets(
 
     tuplets = []
     for i in range(first_after, len(search_results)):
-        tuplet = find_intersecting_tuplet(search_results, i, n_img)
+        tuplet = find_intersecting_tuplet(search_results, i, n_img, min_size=min_size)
         if tuplet is not None:
             tuplets.append(tuplet)
 
     return tuplets
 
 
-def find_intersecting_tuplet(search_results: list[dict], future_idx: int, n_img: int):
+def find_intersecting_tuplet(
+    search_results: list[dict], future_idx: int, n_img: int, min_size: float = 0
+):
     """
     Finds the first set of search result indices ending at future_idx which have an intersection
     """
@@ -65,7 +67,7 @@ def find_intersecting_tuplet(search_results: list[dict], future_idx: int, n_img:
         results = [search_results[i] for i in result_idxs]
 
         intersection = search_result_footprint_intersection(results)
-        if intersection.area > 0:
+        if intersection.area > min_size:
             return result_idxs
     return None
 

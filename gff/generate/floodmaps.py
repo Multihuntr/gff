@@ -265,7 +265,8 @@ def progressively_grow_floodmaps(
 
     # Create tile_grid and initial set of tiles
     tile_grids, footprint_box = mk_grid(viable_footprint, ref_tif.transform, tile_size)
-    tiles = tiles_along_river_within_geom(
+    grid_size = tile_grids[(0, 0)].shape
+    tiles = create_initial_tiles(
         rivers_df,
         viable_footprint,
         tile_grids[(0, 0)],
@@ -273,12 +274,6 @@ def progressively_grow_floodmaps(
         min_river_size=500,
         max_tiles=200,
     )
-    grid_size = tile_grids[(0, 0)].shape
-    if len(tiles) == 0:
-        # This can happen if there's no rivers visible in viable_footprint.
-        # So, just use a square in the center.
-        gw, gh = grid_size
-        tiles.extend(sel_new_tiles_big_window(gw // 2, gh // 2, *grid_size, add=3))
     # Expand a small area around the river tiles
     for tile_x, tile_y in tiles.copy():
         new_tiles = sel_new_tiles_big_window(tile_x, tile_y, *grid_size, add=2)
@@ -474,7 +469,7 @@ def mk_grid(geom: shapely.Geometry, transform: affine.Affine, gridsize: int):
 
 
 def tiles_along_river_within_geom(
-    rivers_df, geom, tile_grid, crs, min_river_size=None, max_tiles=500
+    rivers_df, geom, tile_grid, crs, min_river_size=500, max_tiles=200
 ):
     """
     Select tiles from a tile_grid where the rivers (multiple LINEs) touch a geom (a POLYGON).
@@ -494,6 +489,33 @@ def tiles_along_river_within_geom(
     # Return the tile coordinates of intersection as a list
     x, y = intersects.nonzero()
     return list(zip(x, y))[:max_tiles]
+
+
+def create_initial_tiles(rivers_df, geom, tile_grid, crs, min_river_size=500, max_tiles=200):
+    tiles = tiles_along_river_within_geom(
+        rivers_df,
+        geom,
+        tile_grid,
+        crs,
+        min_river_size=min_river_size,
+        max_tiles=max_tiles,
+    )
+    if len(tiles) == 0:
+        # This can happen if there's no rivers visible in geom.
+        # First try with no restriction on river size
+        tiles = tiles_along_river_within_geom(
+            rivers_df,
+            geom,
+            tile_grid,
+            crs,
+            min_river_size=0,
+            max_tiles=min_river_size,
+        )
+    if len(tiles) == 0:
+        # Then, if there's still no tiles, just use the centre of the footprint.
+        gw, gh = grid_size = tile_grid.shape
+        tiles = sel_new_tiles_big_window(gw // 2, gh // 2, *grid_size, add=3)
+    return tiles
 
 
 def _ensure_logits(tifs, offset_tile_grid, x, y, flood_model, offset_cache):

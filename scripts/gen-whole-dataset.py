@@ -44,7 +44,7 @@ def parse_args(argv):
     return parser.parse_args(argv)
 
 
-def mk_expected(flood_distr: np.ndarray, n_sites: int, est_basins_per_site: int = 15):
+def mk_expected(flood_distr: np.ndarray, n_sites: int, est_basins_per_site: int = 10):
     """
     Calculates how many sites we expect (min) for each continent/climate zone
 
@@ -54,10 +54,12 @@ def mk_expected(flood_distr: np.ndarray, n_sites: int, est_basins_per_site: int 
     for continent in gff.constants.HYDROATLAS_CONTINENT_NAMES:
         if continent in flood_distr:
             total += flood_distr[continent]["total"]
-    cont_ratio = n_sites * est_basins_per_site / total
-    result = collections.defaultdict(lambda: {})
+    cont_ratio = n_sites / total
+    exp_cont_sites = {}
+    exp_cont_basins = collections.defaultdict(lambda: {})
     for i, continent in enumerate(gff.constants.HYDROATLAS_CONTINENT_NAMES):
         n_cont = flood_distr[continent]["total"] * cont_ratio
+        exp_cont_sites[continent] = int(n_cont)
         for clim_zone in gff.constants.HYDROATLAS_CLIMATE_ZONE_NAMES:
             if (
                 continent in flood_distr
@@ -67,25 +69,27 @@ def mk_expected(flood_distr: np.ndarray, n_sites: int, est_basins_per_site: int 
                 proportion = (
                     flood_distr[continent]["zones"][clim_zone] / flood_distr[continent]["total"]
                 )
-                result[continent][clim_zone] = int(proportion * n_cont)
-    return result
+                exp_cont_basins[continent][clim_zone] = int(
+                    proportion * n_cont * est_basins_per_site
+                )
+    return exp_cont_sites, exp_cont_basins
 
 
 def do_ks_assignments(agg_labels_path: Path, basins: geopandas.GeoDataFrame):
     # Count how many of each
-    meta_paths = []
+    meta_paths = collections.defaultdict(lambda: [])
     sites = collections.defaultdict(lambda: collections.defaultdict(lambda: 0))
     tiles = collections.defaultdict(lambda: collections.defaultdict(lambda: 0))
     when_where = []
     d_fmt = "%Y-%m-%d"
     for path in agg_labels_path.glob("*-meta.json"):
-        meta_paths.append(path)
         with open(path) as f:
             meta = json.load(f)
 
         k = meta["HYBAS_ID_4"]
         # Add site/tile counts
         continent = int(str(k)[0])
+        meta_paths[continent].append(path)
         geoms = geopandas.read_file(path.with_name(meta["visit_tiles"]), engine="pyogrio")
         geoms_union = shapely.ops.unary_union(geoms.geometry)
         geoms_union_4326 = gff.util.convert_crs(geoms_union, geoms.crs, "EPSG:4326")
@@ -127,6 +131,40 @@ def estimate_zone_counts(
     return zone_counts_shp(basins, footprint, threshold)
 
 
+def calc_completion(
+    exp_basin_distr, curr_distr, max_sites, curr_sites, max_rows, curr_row, continent=None
+):
+    if continent is not None:
+        incl = [continent]
+    else:
+        incl = [i for i in curr_distr]
+    # Calculate distr overlap
+    n_basin_groups = 0
+    n_basins_counted = 0
+    total_sites, total_basins = 0, 0
+    diff_basins, diff_sites = 0, 0
+    for c in incl:
+        # Basins
+        n_basin_groups += len(exp_basin_distr)
+        for z in exp_basin_distr[c]:
+            if curr_distr[c][z] >= exp_basin_distr[c][z]:
+                n_basins_counted += 1
+            diff_basins += max(0, exp_basin_distr[c][z] - curr_distr[c][z])
+            total_basins += exp_basin_distr[c][z]
+
+        # Sites
+        total_sites += max_sites[c]
+        diff_sites += max(0, max_sites[c] - len(curr_sites[c]))
+    basin_perc = 1 - diff_basins / total_basins
+    site_perc = 1 - diff_sites / total_sites
+    basin_groups_perc = n_basins_counted / n_basin_groups
+
+    # Rows left
+    row_perc = curr_row / max_rows
+
+    return basin_perc, site_perc, basin_groups_perc, row_perc
+
+
 def main(args):
     # Load the various geometry datasources
     dfo = gff.data_sources.load_dfo(args.dfo_path, for_s1=True)
@@ -161,11 +199,11 @@ def main(args):
     flood_distr = gff.generate.basins.flood_distribution(
         dfo, basins08_df, overlap_threshold=0.3, cache_path=flood_cache
     )
-    expected_distr = mk_expected(flood_distr, n_sites=args.sites)
+    exp_cont_sites, exp_basin_distr = mk_expected(flood_distr, n_sites=args.sites)
 
     # Start by adding all kurosiwo labels to current distribution
     ks_metas, ks_sites, ks_tiles, ks_maps = do_ks_assignments(args.ks_agg_labels_path, basins08_df)
-    current_distr_sites = {
+    cur_basin_distr = {
         i: {j: ks_sites[i][j] for j in gff.constants.HYDROATLAS_CLIMATE_ZONE_NAMES}
         for i in gff.constants.HYDROATLAS_CONTINENT_NAMES
     }
@@ -196,11 +234,35 @@ def main(args):
     flood_models = [
         gff.generate.floodmaps.model_runner(name, args.data_path) for name in flood_model_names
     ]
+    # Filter by continent
     basin_floods["continent"] = basin_floods.HYBAS_ID.astype(str).str[0].astype(int)
     if args.continent is not None:
         basin_floods = basin_floods[basin_floods["continent"] == args.continent]
-    for i, basin_row in basin_floods.iterrows():
-        if len(added_sites) >= args.sites:
+
+    # BIG MAIN LOOP
+    completion_columns = [
+        "Basins x floods covering climate zones",
+        "Sites created",
+        "Climate zones with enough basins",
+        "Rows searched",
+    ]
+    print(" | ".join(completion_columns))
+    for i, (_, basin_row) in enumerate(basin_floods.iterrows()):
+        # Calculate how much has been completed through the search
+        perc = _, _, basin_group_perc, _ = calc_completion(
+            exp_basin_distr,
+            cur_basin_distr,
+            exp_cont_sites,
+            added_sites,
+            len(basin_floods),
+            i,
+            args.continent,
+        )
+        fmt_str = " | ".join([f"{{{i}:4.0%}}" for i in range(len(perc))])
+        complete_str = fmt_str.format(*perc)
+        # Exit if we've added enough
+        if basin_group_perc >= 1:
+            print(complete_str)
             break
 
         key = f"{basin_row.ID}-{basin_row.HYBAS_ID}"
@@ -217,13 +279,15 @@ def main(args):
             approach_results = desc
         else:
             msg = f"{len(search_results)} | ({len(asc)}, {len(desc)})"
-            print(f"{key}: Not enough S1 images available. {msg}")
+            print(f"{complete_str} | {key}: Not enough S1 images available. {msg}")
             continue
 
         # Identify viable image tuplets by overlap
-        tuplets = gff.generate.util.find_intersecting_tuplets(approach_results, basin_row, n_img=3)
+        tuplets = gff.generate.util.find_intersecting_tuplets(
+            approach_results, basin_row, n_img=3, min_size=0.1
+        )
         if len(tuplets) == 0:
-            print(f"{key}: No S1 images overlap.")
+            print(f"{complete_str} | {key}: No S1 images overlap.")
             continue
 
         # Remove tuplets that are too close to existing
@@ -236,29 +300,29 @@ def main(args):
             else:
                 safe_tuplets.append(tuplet)
         if len(safe_tuplets) == 0:
-            print(f"{key}: All S1 image tuplets are too close to existing ones.")
+            print(f"{complete_str} | {key}: All S1 image tuplets are too close to existing ones.")
             continue
 
         # Check if we believe this site will give us level 8 basins we want.
         wanted_tuplets = []
         for tuplet in safe_tuplets:
-            # NOTE: This is necessary because different tuplets overlap different areas
+            # NOTE: This is a for loop because different tuplets overlap different areas
             counts = estimate_zone_counts(basins08_df, approach_results, safe_tuplets[0])
             wanted_zones = 0
             for clim_zone, count in counts.iterrows():
-                expected_count = expected_distr[continent][clim_zone]
-                curr_count = current_distr_sites[continent][clim_zone]
+                expected_count = exp_basin_distr[continent][clim_zone]
+                curr_count = cur_basin_distr[continent][clim_zone]
                 if (curr_count + count.item()) < expected_count + 3:
                     wanted_zones += 1
             if (wanted_zones / len(counts)) > 0.5:
                 wanted_tuplets.append(tuplet)
         if len(wanted_tuplets) == 0:
-            print(f"{key}: Already enough sites for this continent/climate zone")
+            print(f"{complete_str} | {key}: Already enough sites for this continent/climate zone")
             continue
 
         # Generate floodmaps for this basin_row
         for name, flood_model in zip(flood_model_names, flood_models):
-            print(f"{key}: Generating {name} floodmaps")
+            print(f"{complete_str} | {key}: Generating {name} floodmaps")
             if not gff.generate.floodmaps.check_floodmap_exists(args.data_path, key, name):
                 if rivers_df is None:
                     rivers_df = gff.generate.floodmaps.load_rivers(args.hydroatlas_path)
@@ -302,8 +366,9 @@ def main(args):
             geoms = geopandas.read_file(folder / flood_meta["visit_tiles"], engine="pyogrio")
             overlap_counts = zone_counts_shp(basins08_df, shapely.ops.unary_union(geoms))
             for clim_zone, count in overlap_counts.iterrows():
-                current_distr_sites[continent][clim_zone] += count.item()
+                cur_basin_distr[continent][clim_zone] += count.item()
                 current_distr_tiles[continent][clim_zone] += len(geoms)
+            added_sites[continent].append(flood_meta)
             if len(metas) > 1:
                 w_negative[continent][clim_zone] += 1
         elif len(metas) > 0:
@@ -311,14 +376,15 @@ def main(args):
 
     distributions = {
         "floods": flood_distr,
-        "expected": expected_distr,
-        "created": current_distr_sites,
+        "expected": exp_basin_distr,
+        "created": cur_basin_distr,
         "with_neg": w_negative,
         "pure_neg": just_negative,
         "created_tiles": current_distr_tiles,
     }
     with open(args.data_path / "distributions.json", "w") as f:
         json.dump(distributions, f)
+    print("All done!")
 
 
 if __name__ == "__main__":

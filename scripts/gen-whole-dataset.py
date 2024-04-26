@@ -77,7 +77,7 @@ def mk_expected(flood_distr: np.ndarray, n_sites: int, est_basins_per_site: int 
 
 def do_ks_assignments(agg_labels_path: Path, basins: geopandas.GeoDataFrame):
     # Count how many of each
-    meta_paths = collections.defaultdict(lambda: [])
+    metas = collections.defaultdict(lambda: [])
     sites = collections.defaultdict(lambda: collections.defaultdict(lambda: 0))
     tiles = collections.defaultdict(lambda: collections.defaultdict(lambda: 0))
     when_where = []
@@ -89,7 +89,7 @@ def do_ks_assignments(agg_labels_path: Path, basins: geopandas.GeoDataFrame):
         k = meta["HYBAS_ID_4"]
         # Add site/tile counts
         continent = int(str(k)[0])
-        meta_paths[continent].append(path)
+        metas[continent].append(meta)
         geoms = geopandas.read_file(path.with_name(meta["visit_tiles"]), engine="pyogrio")
         geoms_union = shapely.ops.unary_union(geoms.geometry)
         geoms_union_4326 = gff.util.convert_crs(geoms_union, geoms.crs, "EPSG:4326")
@@ -103,7 +103,7 @@ def do_ks_assignments(agg_labels_path: Path, basins: geopandas.GeoDataFrame):
         footprint = shapely.convex_hull(shapely.union_all(geoms.geometry))
         footprint_4326 = gff.util.convert_crs(footprint, geoms.crs, "EPSG:4326")
         when_where.append((d.timestamp(), footprint_4326))
-    return meta_paths, sites, tiles, when_where
+    return metas, sites, tiles, when_where
 
 
 def get_this_lvl4(shp: shapely.Geometry, lvl4_basins: geopandas.GeoDataFrame):
@@ -132,12 +132,19 @@ def estimate_zone_counts(
 
 
 def calc_completion(
-    exp_basin_distr, curr_distr, max_sites, curr_sites, max_rows, curr_row, continent=None
+    exp_basin_distr,
+    curr_flood_distr,
+    curr_noflood_distr,
+    max_sites,
+    curr_sites,
+    max_rows,
+    curr_row,
+    continent=None,
 ):
     if continent is not None:
         incl = [continent]
     else:
-        incl = [i for i in curr_distr]
+        incl = [i for i in curr_flood_distr]
     # Calculate distr overlap
     n_basin_groups = 0
     n_basins_counted = 0
@@ -147,14 +154,16 @@ def calc_completion(
         # Basins
         n_basin_groups += len(exp_basin_distr)
         for z in exp_basin_distr[c]:
-            if curr_distr[c][z] >= exp_basin_distr[c][z]:
+            curr_count = curr_flood_distr[c][z] + 0.5 * curr_noflood_distr[c][z]
+            if curr_count >= exp_basin_distr[c][z]:
                 n_basins_counted += 1
-            diff_basins += max(0, exp_basin_distr[c][z] - curr_distr[c][z])
+            diff_basins += max(0, exp_basin_distr[c][z] - curr_count)
             total_basins += exp_basin_distr[c][z]
 
         # Sites
         total_sites += max_sites[c]
-        diff_sites += max(0, max_sites[c] - len(curr_sites[c]))
+        n_sites = sum([1 if meta["flooding"] else 0.5 for meta in curr_sites[c]])
+        diff_sites += max(0, max_sites[c] - n_sites)
     basin_perc = 1 - diff_basins / total_basins
     site_perc = 1 - diff_sites / total_sites
     basin_groups_perc = n_basins_counted / n_basin_groups
@@ -203,15 +212,11 @@ def main(args):
 
     # Start by adding all kurosiwo labels to current distribution
     ks_metas, ks_sites, ks_tiles, ks_maps = do_ks_assignments(args.ks_agg_labels_path, basins08_df)
-    cur_basin_distr = {
+    cur_basin_flood_distr = {
         i: {j: ks_sites[i][j] for j in gff.constants.HYDROATLAS_CLIMATE_ZONE_NAMES}
         for i in gff.constants.HYDROATLAS_CONTINENT_NAMES
     }
-    w_negative = {
-        i: {j: 0 for j in gff.constants.HYDROATLAS_CLIMATE_ZONE_NAMES}
-        for i in gff.constants.HYDROATLAS_CONTINENT_NAMES
-    }
-    just_negative = {
+    cur_basin_noflood_distr = {
         i: {j: 0 for j in gff.constants.HYDROATLAS_CLIMATE_ZONE_NAMES}
         for i in gff.constants.HYDROATLAS_CONTINENT_NAMES
     }
@@ -251,7 +256,8 @@ def main(args):
         # Calculate how much has been completed through the search
         perc = _, _, basin_group_perc, _ = calc_completion(
             exp_basin_distr,
-            cur_basin_distr,
+            cur_basin_flood_distr,
+            cur_basin_noflood_distr,
             exp_cont_sites,
             added_sites,
             len(basin_floods),
@@ -269,7 +275,8 @@ def main(args):
         continent = basin_row.continent
 
         # Search for S1 images; cache, static filter and choose approach type
-        search_results = gff.generate.search.get_search_results(s1_index, basin_row)
+        may_conflict = args.continent is None
+        search_results = gff.generate.search.get_search_results(s1_index, basin_row, may_conflict)
         filtered_results, _ = gff.generate.search.filter_search_results(search_results, basin_row)
         asc = filtered_results["asc"]
         desc = filtered_results["desc"]
@@ -311,7 +318,7 @@ def main(args):
             wanted_zones = 0
             for clim_zone, count in counts.iterrows():
                 expected_count = exp_basin_distr[continent][clim_zone]
-                curr_count = cur_basin_distr[continent][clim_zone]
+                curr_count = cur_basin_flood_distr[continent][clim_zone]
                 if (curr_count + count.item()) < expected_count + 3:
                     wanted_zones += 1
             if (wanted_zones / len(counts)) > 0.5:
@@ -361,25 +368,22 @@ def main(args):
             ts = datetime.datetime.fromisoformat(meta["post_date"]).timestamp()
             existing_maps.append((ts, hull))
 
-        if any([meta["flooding"] for meta in metas]):
-            flood_meta = metas[-1]
-            geoms = geopandas.read_file(folder / flood_meta["visit_tiles"], engine="pyogrio")
+            geoms = geopandas.read_file(folder / meta["visit_tiles"], engine="pyogrio")
             overlap_counts = zone_counts_shp(basins08_df, shapely.ops.unary_union(geoms))
             for clim_zone, count in overlap_counts.iterrows():
-                cur_basin_distr[continent][clim_zone] += count.item()
+                if meta["flooding"]:
+                    cur_basin_flood_distr[continent][clim_zone] += count.item()
+                else:
+                    cur_basin_noflood_distr[continent][clim_zone] += count.item()
+
                 current_distr_tiles[continent][clim_zone] += len(geoms)
-            added_sites[continent].append(flood_meta)
-            if len(metas) > 1:
-                w_negative[continent][clim_zone] += 1
-        elif len(metas) > 0:
-            just_negative[continent][clim_zone] += 1
+            added_sites[continent].append(meta)
 
     distributions = {
         "floods": flood_distr,
         "expected": exp_basin_distr,
-        "created": cur_basin_distr,
-        "with_neg": w_negative,
-        "pure_neg": just_negative,
+        "created": cur_basin_flood_distr,
+        "negatives": cur_basin_noflood_distr,
         "created_tiles": current_distr_tiles,
     }
     with open(args.data_path / "distributions.json", "w") as f:

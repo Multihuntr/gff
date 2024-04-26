@@ -54,9 +54,12 @@ def min_timing(group, ref_ts, n):
     return before >= n and after > 0
 
 
-def get_search_results(index: sqlite3.Connection, shp: geopandas.GeoSeries):
+def get_search_results(
+    index: sqlite3.Connection, shp: geopandas.GeoSeries, proc_may_conflict: bool = True
+):
     k = f"{shp.ID}-{shp.HYBAS_ID}"
-    index.execute("BEGIN EXCLUSIVE")
+    if proc_may_conflict:
+        index.execute("BEGIN EXCLUSIVE")
     values = index.execute("SELECT json FROM results WHERE key LIKE ?", (k,)).fetchall()
     if len(values) > 0:
         index.commit()

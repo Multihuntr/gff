@@ -321,7 +321,7 @@ def main(args):
                 curr_count = cur_basin_flood_distr[continent][clim_zone]
                 if (curr_count + count.item()) < expected_count + 3:
                     wanted_zones += 1
-            if (wanted_zones / len(counts)) > 0.5:
+            if len(counts) > 0 and (wanted_zones / len(counts)) > 0.5:
                 wanted_tuplets.append(tuplet)
         if len(wanted_tuplets) == 0:
             print(f"{complete_str} | {key}: Already enough sites for this continent/climate zone")

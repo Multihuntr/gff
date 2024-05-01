@@ -152,7 +152,7 @@ def calc_completion(
     diff_basins, diff_sites = 0, 0
     for c in incl:
         # Basins
-        n_basin_groups += len(exp_basin_distr)
+        n_basin_groups += len(exp_basin_distr[c])
         for z in exp_basin_distr[c]:
             curr_count = curr_flood_distr[c][z] + 0.5 * curr_noflood_distr[c][z]
             if curr_count >= exp_basin_distr[c][z]:
@@ -354,11 +354,6 @@ def main(args):
                 print(f"    {name} floodmaps already exist.")
 
         # Each call to create_flood_maps can generate multiple flood maps.
-        # We track three cases:
-        #   1. Only one floodmap; has flooding.
-        #   2. Multiple floodmaps; one with flooding, n without.
-        #   3. Any number of floodmaps without any flooding.
-        # Only #1 contributes to the distribution calculation. The others are FYIs.
         # NOTE: Using hoisted name to only count once; thus whichever was last in the list
         metas = gff.generate.floodmaps.load_metas(args.data_path, key, name)
         folder = args.data_path / "floodmaps" / name

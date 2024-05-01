@@ -1,33 +1,178 @@
+import numpy as np
 import torch
+import torch.nn as nn
+import torch.utils.tensorboard
+import torchmetrics
+import tqdm
+
+import gff.util
 
 
-def recursive_todevice(x, device):
-    if isinstance(x, torch.Tensor):
-        return x.to(device)
-    elif isinstance(x, dict):
-        return {k: recursive_todevice(v, device) for k, v in x.items()}
-    else:
-        return [recursive_todevice(c, device) for c in x]
-
-
-def train_epoch(model, optim: torch.optim.Optimizer, dataloader, device):
-    for example in dataloader:
-        out = recursive_todevice(example, model.device)
-        out = model(example)
+def train_epoch(
+    model: nn.Module,
+    dataloader,
+    criterion,
+    optim: torch.optim.Optimizer,
+    write_scalars: callable,
+    write_imgs: callable,
+    scalar_freq: int,
+    img_freq: int,
+):
+    losses = []
+    device = next(model.parameters()).device
+    f1 = torchmetrics.classification.MulticlassF1Score(3, average="macro")
+    f1.to(device)
+    for i, example in enumerate(tqdm.tqdm(dataloader, desc="Training", leave=False)):
+        example = gff.util.recursive_todevice(example, device)
+        targ = example.pop("floodmap")
+        pred = model(example)
 
         optim.zero_grad()
+        loss = criterion(pred, targ[:, 0])
+        loss.backward()
+        optim.step()
+
+        this_f1 = f1(pred, targ[:, 0])
+        loss_float = loss.cpu().item()
+        losses.append(loss_float)
+        if ((i + 1) % scalar_freq) == 0:
+            write_scalars(loss_float, this_f1.cpu().item())
+        if ((i + 1) & img_freq) == 0:
+            write_imgs(example, pred, targ)
+    return sum(losses) / len(losses), f1.compute().cpu().item()
 
 
-def training_loop(C, model, dataloaders):
+def test_epoch(model, dataloader, criterion, limit: int = None):
+    with torch.no_grad():
+        losses = []
+        device = next(model.parameters()).device
+        f1 = torchmetrics.classification.MulticlassF1Score(3, average="macro")
+        f1.to(device)
+        for i, example in enumerate(tqdm.tqdm(dataloader, desc="Testing", leave=False)):
+            example = gff.util.recursive_todevice(example, device)
+            targ = example.pop("floodmap")
+            pred = model(example)
+
+            loss = criterion(pred, targ[:, 0])
+
+            f1(pred, targ[:, 0])
+            losses.append(loss.cpu().item())
+            if limit is not None and i >= limit:
+                break
+    return sum(losses) / len(losses), f1.compute()
+
+
+def auto_incr_scalar_writer_closure(writer):
+
+    def add_next(loss: float, f1: float):
+        writer.add_scalar("Loss/train_batch", loss, add_next.count)
+        writer.add_scalar("F1/train_batch", f1, add_next.count)
+        add_next.count += 1
+
+    add_next.count = 0
+    return add_next
+
+
+def cls_to_rgb(arr: np.ndarray):
+    colours = np.array([(18, 19, 19), (60, 125, 255), (255, 64, 93)]) / 256
+    out_arr = np.zeros((*arr.shape, 3))
+    for cls_idx in range(3):
+        out_arr[(arr == cls_idx)] = colours[cls_idx][None]
+    return out_arr
+
+
+def auto_incr_img_writer_closure(writer):
+
+    def add_next(ex: dict, pred: torch.tensor, targ: torch.tensor):
+        pred_cls = pred[0].argmax(dim=0).cpu().numpy()
+        pred_rgb = cls_to_rgb(pred_cls)
+        targ_cls = targ[0, 0].cpu().numpy()
+        targ_rgb = cls_to_rgb(targ_cls)
+        context_rasters = []
+        for k in ["era5", "era5_land"]:
+            if k in ex:
+                r = ex[k][0][:, :3].cpu().numpy()
+                context_rasters.extend(r)
+        if "hydroatlas" in ex:
+            r = ex["hydroatlas"][0][:3].cpu().numpy()
+            context_rasters.append(r)
+        if "dem_context" in ex:
+            r = ex["dem_context"][0].repeat((3, 1, 1)).cpu().numpy()
+            context_rasters.append(r)
+
+        local_rasters = []
+        if "dem_local" in ex:
+            r = ex["dem_local"][0].repeat((3, 1, 1)).cpu().numpy()
+            local_rasters.append(r)
+        if "s1" in ex:
+            r = ex["s1"][0].cpu().numpy()
+            r = np.stack([*r, np.zeros_like(r[0])], axis=0)
+            local_rasters.append(r)
+
+        writer.add_images("context", np.stack(context_rasters), add_next.count)
+        writer.add_images("local", np.stack(local_rasters), add_next.count)
+        writer.add_images(
+            "pred_vs_targ", np.stack([pred_rgb, targ_rgb]), add_next.count, dataformats="NHWC"
+        )
+        add_next.count += 1
+
+    add_next.count = 0
+    return add_next
+
+
+def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=None):
     optim = torch.optim.AdamW(model.parameters(), lr=C["lr"])
     scheduler = torch.optim.lr_scheduler.MultiplicativeLR(
         optim, lambda epoch: C["lr_decay"] ** epoch
     )
+    start_epoch = 0
+    if checkpoint is not None:
+        model.load_state_dict(checkpoint["model"])
+        optim.load_state_dict(checkpoint["optim"])
+        scheduler.load_state_dict(checkpoint["scheduler"])
+        start_epoch = checkpoint["epoch"]
+    criterion = nn.CrossEntropyLoss()
+
+    writer = torch.utils.tensorboard.SummaryWriter(model_folder)
+    write_scalars = auto_incr_scalar_writer_closure(writer)
+    write_imgs = auto_incr_img_writer_closure(writer)
+
+    def do_save(epoch):
+        torch.save(
+            {
+                "model": model.state_dict(),
+                "optim": optim.state_dict(),
+                "scheduler": scheduler.state_dict(),
+                "epoch": epoch,
+            },
+            model_folder / f"checkpoint_{epoch:03d}.th",
+        )
 
     train_dl, test_dl = dataloaders
+    hoisted_epoch = start_epoch
+    try:
+        for epoch in tqdm.tqdm(range(start_epoch, C["epochs"]), desc="Training epochs"):
+            hoisted_epoch = epoch
+            train_loss, train_f1 = train_epoch(
+                model,
+                train_dl,
+                criterion,
+                optim,
+                write_scalars,
+                write_imgs,
+                scalar_freq=C["scalar_freq"],
+                img_freq=C["img_freq"],
+            )
+            test_loss, test_f1 = test_epoch(model, test_dl, criterion, limit=256)
 
-    for epoch in range(C["epochs"]):
-        train_loss = train_epoch(model, optim, train_dl)
-        test_loss = test_epoch(model, optim, test_dl, train=False)
+            writer.add_scalar("Loss/train_epoch", train_loss, epoch)
+            writer.add_scalar("F1/train_epoch", train_f1, epoch)
+            writer.add_scalar("Loss/test", test_loss, epoch)
+            writer.add_scalar("F1/test", test_f1, epoch)
 
-    pass
+            scheduler.step()
+    finally:
+        writer.close()
+        do_save(hoisted_epoch)
+
+    return model

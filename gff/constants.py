@@ -88,3 +88,10 @@ ERA5_BANDS = [
     "u_component_of_wind_10m",
     "v_component_of_wind_10m",
 ]
+
+# The dataset is generated assuming this resolution.
+# If this gets increased, then we can no longer guarantee zero overlap between sites.
+# Which may lead to test set information leaking into the training set.
+ERA5L_DEGREES_PER_PIXEL = 0.1
+CONTEXT_RESOLUTION = 32
+CONTEXT_DEGREES = CONTEXT_RESOLUTION * ERA5L_DEGREES_PER_PIXEL

@@ -1,3 +1,5 @@
+import datetime
+import functools
 import io
 import itertools
 import json
@@ -14,6 +16,8 @@ import asf_search as asf
 
 import geopandas
 import pandas
+import rasterio
+import shapely
 import xarray
 
 from . import util
@@ -273,3 +277,85 @@ def load_dfo(path: Path, for_s1: bool = False):
         dfo = dfo[dfo["BEGAN"] >= "2014-01-01"]
 
     return dfo
+
+
+@functools.lru_cache(maxsize=None)
+def _era5_band_index(p: Path):
+    band_index = {}
+    with rasterio.open(p) as tif:
+        for i, name in tif.descriptions:
+            parts = name.split("-")
+            day = "-".join(parts[:2])
+            k = parts[-1]
+            if day not in band_index:
+                band_index[day] = {}
+            band_index[day][k] = i
+    return band_index
+
+
+def load_era5(
+    folder: Path,
+    geom: shapely.Geometry,
+    res: int,
+    start: datetime.datetime,
+    end: datetime.datetime,
+    keys: list[str] = None,
+    era5_land: bool = True,
+):
+    if keys is None:
+        if era5_land:
+            keys = constants.ERA5L_BAND
+        else:
+            keys = constants.ERA5_BANDS
+    results = []
+    current = start
+    while current <= end:
+        if era5_land:
+            fname = f"era5-land-{current.year}-{current.month}.tif"
+        else:
+            fname = f"era5-{current.year}-{current.month}.tif"
+        band_index = _era5_band_index(folder / fname)
+        day_str = current.strftime("%Y-%m-%d")
+        band_idxs = [band_index[day_str][k] for k in keys]
+        with rasterio.open(folder / fname) as tif:
+            window = util.shapely_bounds_to_rasterio_window(
+                geom.bounds, tif.transform, align=False
+            )
+            data = tif.read(
+                band_idxs,
+                window=window,
+                out_shape=(res, res),
+                resampling=rasterio.enums.Resampling.bilinear,
+            )
+            data = data * tif.scales[:, None, None] + tif.offsets[:, None, None]
+        results.append(data)
+        current += datetime.timedelta(days=1)
+
+    return results
+
+
+def load_pregenerated_raster(
+    fpath: Path, geom: shapely.Geometry, res: int, keys: list[str] = None
+):
+    with rasterio.open(fpath) as tif:
+        if keys is None:
+            band_idxs = list(range(len(tif.descriptions)))
+        else:
+            band_idxs = [tif.descriptions.index(k) + 1 for k in keys]
+        window = util.shapely_bounds_to_rasterio_window(geom.bounds, tif.transform, align=False)
+        return tif.read(
+            band_idxs,
+            window=window,
+            out_shape=(res, res),
+            resampling=rasterio.enums.Resampling.bilinear,
+        )
+
+
+def get_climate_zone(folder: Path, geom: shapely.Geometry):
+    fpath = folder / constants.HYDROATLAS_RASTER_FNAME
+    with rasterio.open(fpath) as tif:
+        px = util.convert_affine_inplace(geom.centroid, ~tif.transform)
+        x, y = shapely.get_coordinates(px)[0]
+        window = ((y, y + 1), (x, x + 1))
+        band_idx = 1 + tif.descriptions.index(constants.HYDROATLAS_CLIMATE_ZONE_BAND_NAME)
+        return int(tif.read(band_idx, window=window).item())

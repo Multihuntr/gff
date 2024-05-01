@@ -1,6 +1,8 @@
 import datetime
 import json
 import math
+import os
+import random
 from pathlib import Path
 from typing import Sequence, Union
 
@@ -258,6 +260,34 @@ def get_upstream_basins(basins, basin_id):
 
     # Concat the geodataframes back into a single dataframe
     return geopandas.GeoDataFrame(pd.concat(include_list, ignore_index=True))
+
+
+# Torch utils
+
+
+def recursive_todevice(x, device):
+    if isinstance(x, torch.Tensor):
+        return x.to(device)
+    elif isinstance(x, dict):
+        return {k: recursive_todevice(v, device) for k, v in x.items()}
+    elif isinstance(x, list):
+        return [recursive_todevice(c, device) for c in x]
+    else:
+        return x
+
+
+def seed_packages(seed):
+    # Delay until needed 'cause expensive
+    import torch.cuda
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    # torch.use_deterministic_algorithms(True, warn_only=True)
+    # torch.backends.cudnn.benchmark = False
 
 
 # The ol' misc. functions

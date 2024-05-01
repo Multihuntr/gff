@@ -12,3 +12,6 @@ caravan/split
 *.tif
 *.png
 .create_some_maps.sh
+vis
+partitions
+runs

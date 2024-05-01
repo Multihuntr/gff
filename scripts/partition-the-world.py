@@ -56,6 +56,16 @@ def allocate_caravan(
     return caravan_partitions
 
 
+def allocate_floodmaps(floodmaps_df, partitions_geoms):
+    out_partitions = []
+    floodmap_geoms = np.array(floodmaps_df.geometry.values)
+    for partition_geoms in partitions_geoms:
+        index = shapely.within(floodmap_geoms[:, None], partition_geoms[None, :])
+        out_partition = floodmaps_df[index.any(axis=1)]
+        out_partitions.append(out_partition[["fname"]])
+    return out_partitions
+
+
 def allocate_by_points(points: np.ndarray, partitions: list[shapely.GeometryCollection]):
     return [shapely.within(points, partition) for partition in partitions]
 
@@ -75,10 +85,12 @@ def center_of(p: Path):
     return shapely.centroid(footprint)
 
 
-def get_tiles(p: Path):
+def get_tiles_center(p: Path):
     with p.open() as f:
         meta = json.load(f)
-    return [shapely.Polygon(t) for t in meta["visit_tiles"]]
+    tiles = geopandas.read_file(p.parent / meta["visit_tiles"])
+    tiles = tiles.to_crs("EPSG:4326")
+    return shapely.centroid(shapely.union_all(tiles))
 
 
 def count_within(points, partition):
@@ -105,11 +117,11 @@ def main(args):
     basin_df["continent"] = basin_df.HYBAS_ID.astype(str).str[0].astype(int)
 
     ks_points = np.array([center_of(path) for path in args.ks_agg_labels_path.glob("*.tif")])
-    tile_points = [
-        shapely.centroid(shapely.union_all(get_tiles(path)))
-        for path in args.floodmaps_path.glob("*-meta.json")
-    ]
+    floodmap_paths = list(args.floodmaps_path.glob("*-meta.json"))
+    tile_points = [get_tiles_center(path) for path in floodmap_paths]
     tile_points = np.array(tile_points)
+    floodmap_data = {"fname": [p.name for p in floodmap_paths], "geometry": tile_points}
+    floodmaps_df = geopandas.GeoDataFrame(floodmap_data, geometry="geometry", crs="EPSG:4326")
 
     # Allocate randomly, then check distribution, and pick the most well distributed
     best_score = 100
@@ -143,13 +155,13 @@ def main(args):
             + calc_distribution_score(counts["gff"])
         )
         if score < best_score:
-            best = [partitions, caravan_partitions, counts]
+            best = [partitions, partition_shps, caravan_partitions, counts]
             best_score = score
         print(
             f"Last: {score:7.5f}, Best: {best_score:7.5f}.   ({x+1:5d}/{args.trials:5d} complete)"
         )
 
-    (partitions, caravan_partitions, counts) = best
+    (partitions, partition_shps, caravan_partitions, counts) = best
 
     # Store to disk
     partition_folder: Path = args.out_folder / "partitions"
@@ -157,7 +169,12 @@ def main(args):
     for i, partition in enumerate(partitions):
         partition.to_file(partition_folder / f"partition_{i}.gpkg", engine="pyogrio")
     for i, caravan_partition in enumerate(caravan_partitions):
-        caravan_partition.to_csv(partition_folder / f"caravan_partition_{i}.txt", index=False)
+        fname = partition_folder / f"caravan_partition_{i}.txt"
+        caravan_partition.to_csv(fname, index=False, header=False)
+    floodmap_partitions = allocate_floodmaps(floodmaps_df, partition_shps)
+    for i, floodmap_partition in enumerate(floodmap_partitions):
+        fname = partition_folder / f"floodmap_partition_{i}.txt"
+        floodmap_partition.to_csv(fname, index=False, header=False)
 
     row_template = "{0:10s}: " + "|".join([f" {{{i+1}:7d}} " for i in range(args.n_partitions)])
     print("Continents")
@@ -176,7 +193,7 @@ def main(args):
     print("Kurosiwo targets")
     print(row_template.format("# roi", *counts["ks"]))
 
-    print("Generated floodmaps")
+    print("GFF dataset floodmaps (including kurosiwo)")
     print(row_template.format("# roi x T", *counts["gff"]))
 
     print("Distribution score: ", best_score)

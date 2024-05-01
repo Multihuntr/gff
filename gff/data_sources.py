@@ -27,19 +27,24 @@ class URLNotAvailable(Exception):
 _tried = {}
 
 
-def download_url(url):
+def download_url(url, max_tries=3, verbose=False):
     if url in _tried:
+        # Trying to be a good denizen of the internet and not spam the endpoint
+        # if we know that it's not available
         raise URLNotAvailable()
-    print("Downloading", url)
-    for i in range(3):
+    if verbose:
+        print("Downloading", url)
+    for i in range(max_tries):
         try:
             with urllib.request.urlopen(url) as f:
                 return f.read()
         except:
-            print("Server returned error. Trying again in a few seconds.")
-            time.sleep(3)
+            if i < (max_tries - 1):
+                print("Server returned error. Trying again in a few seconds.")
+                time.sleep(3)
     _tried[url] = True
-    print("URL not available.")
+    if verbose:
+        print("URL not available.")
     raise URLNotAvailable()
 
 
@@ -55,7 +60,9 @@ def degrees_to_north_east(north: int, east: int):
     return f"{ns}{north:02d}", f"{ew}{east:03d}"
 
 
-def get_cop_dem_file(north: int, east: int, folder: Path, name: str):
+def get_cop_dem_file(
+    north: int, east: int, folder: Path, name: str, download_fnc: callable = download_url
+):
     """
     Allowed names:
         COP-DEM_GLO-30-DGED/2021_1
@@ -78,7 +85,7 @@ def get_cop_dem_file(north: int, east: int, folder: Path, name: str):
     # Download tar
     base_url = "https://prism-dem-open.copernicus.eu/pd-desk-open-access/prismDownload"
     url = f"{base_url}/{name}/{tile_name}.tar"
-    bin_data = download_url(url)
+    bin_data = download_fnc(url)
 
     # Unpack tar and convert to tif (Subprocess to GDAL because nothing else knows what it is)
     fp = io.BytesIO(bin_data)
@@ -160,7 +167,7 @@ def get_nbyn_product(shp, shp_crs, folder, getter, n=1, preprocess=None, **kwarg
     Automatically handles the case that shp goes over multiple product tile boundaries
     """
     if shp_crs != "EPSG:4326":
-        util.convert_crs(shp, shp_crs, "EPSG:4326")
+        shp4326 = util.convert_crs(shp, shp_crs, "EPSG:4326")
     else:
         shp4326 = shp
 
@@ -215,26 +222,35 @@ def preprocess_s1(data_folder: Path, s1_fname: Path, out_fname: Path):
         return
     tmp_folder = Path("tmp")
     (img_folder / tmp_folder).mkdir(exist_ok=True)
-    args = [
-        "docker",
-        "run",
-        "--rm",
-        "-it",
-        "-v",
-        f"{str(data_folder)}/dem:/root/.snap/auxdata/dem",
-        "-v",
-        f"{str(data_folder)}/Orbits:/root/.snap/auxdata/Orbits",
-        "-v",
-        f"{str(img_folder)}:/data",
-        "esa-snappy",
-        "bash",
-        "-c",
-        f"gpt graph.xml -c 12G -Ssource=/data/{s1_fname} -t /data/tmp/{out_fname} "
-        f"&& chown -R {os.getuid()} /data/tmp/{out_fname}"
-        f"&& chown -R {os.getuid()} /data/tmp/{out_fname.with_suffix('.data')}",
-    ]
+
+    def mk_args(graph_name):
+        return [
+            "docker",
+            "run",
+            "--rm",
+            "-it",
+            "-v",
+            f"{str(data_folder)}/dem:/root/.snap/auxdata/dem",
+            "-v",
+            f"{str(data_folder)}/Orbits:/root/.snap/auxdata/Orbits",
+            "-v",
+            f"{str(img_folder)}:/data",
+            "esa-snappy",
+            "bash",
+            "-c",
+            f"gpt {graph_name} -c 12G -Ssource=/data/{s1_fname} -t /data/tmp/{out_fname} "
+            f"&& chown -R {os.getuid()} /data/tmp/{out_fname}"
+            f"&& chown -R {os.getuid()} /data/tmp/{out_fname.with_suffix('.data')}",
+        ]
+
     print(f"Preprocessing {img_folder / s1_fname} to {img_folder}/{tmp_folder}/{out_fname}")
+    args = mk_args("graph.xml")
     process_result = subprocess.run(args)
+
+    if not (img_folder / tmp_folder / out_fname).exists():
+        # At least one can't have noise removal applied, so retry with no noise removal
+        args = mk_args("graph_nonoise.xml")
+        process_result = subprocess.run(args)
 
     if not (img_folder / tmp_folder / out_fname).exists():
         raise Exception("Docker run failed for some reason.")

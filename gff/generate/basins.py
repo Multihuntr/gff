@@ -12,6 +12,9 @@ import skimage
 import tqdm
 
 
+import gff.generate.util
+
+
 def basin_distribution(data_folder: Path, basins: geopandas.GeoDataFrame):
     """
     Calculates the distribution of basins per continent/climate zone
@@ -200,3 +203,51 @@ def by_impact(w_flood: geopandas.GeoDataFrame):
     w_flood = w_flood.sort_values(["impact", "pop_ct_usu"], ascending=False)
 
     return w_flood
+
+
+def zone_counts_shp(basins: geopandas.GeoDataFrame, shp: shapely.Geometry, threshold: float = 0.3):
+    overlaps = overlaps_at_least(basins.geometry, shp, threshold)
+    overlap_basins = basins[overlaps]
+    return overlap_basins[["HYBAS_ID", "clz_cl_smj"]].groupby("clz_cl_smj").count()
+
+
+def estimate_zone_counts(
+    basins: geopandas.GeoDataFrame,
+    search_results: list[dict],
+    search_idx: list[int],
+    threshold: float = 0.3,
+):
+    results = [search_results[i] for i in search_idx]
+    footprint = gff.generate.util.search_result_footprint_intersection(results)
+    return zone_counts_shp(basins, footprint, threshold)
+
+
+def mk_expected_distribution(flood_distr: np.ndarray, n_sites: int, est_basins_per_site: int = 10):
+    """
+    Calculates how many sites we expect (min) for each continent/climate zone
+
+    returns { <continent>: {<climate_zone>: int} }
+    """
+    total = 0
+    for continent in gff.constants.HYDROATLAS_CONTINENT_NAMES:
+        if continent in flood_distr:
+            total += flood_distr[continent]["total"]
+    cont_ratio = n_sites / total
+    exp_cont_sites = {}
+    exp_cont_basins = collections.defaultdict(lambda: {})
+    for i, continent in enumerate(gff.constants.HYDROATLAS_CONTINENT_NAMES):
+        n_cont = flood_distr[continent]["total"] * cont_ratio
+        exp_cont_sites[continent] = int(n_cont)
+        for clim_zone in gff.constants.HYDROATLAS_CLIMATE_ZONE_NAMES:
+            if (
+                continent in flood_distr
+                and clim_zone in flood_distr[continent]["zones"]
+                and flood_distr[continent]["total"] > 0
+            ):
+                proportion = (
+                    flood_distr[continent]["zones"][clim_zone] / flood_distr[continent]["total"]
+                )
+                exp_cont_basins[continent][clim_zone] = int(
+                    proportion * n_cont * est_basins_per_site
+                )
+    return exp_cont_sites, exp_cont_basins

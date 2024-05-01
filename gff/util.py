@@ -122,7 +122,7 @@ def convert_affine_inplace(shp, transform: affine.Affine, dtype=np.float64):
 def convert_shp_inplace(shp, op: callable):
     coords = shapely.get_coordinates(shp).astype(np.float64)
     coords_transformed = op(coords)
-    shapely.set_coordinates(shp, coords_transformed)
+    shp = shapely.set_coordinates(shp, coords_transformed)
     return shp
 
 
@@ -141,6 +141,8 @@ def resample_xr(
     method: str = "nearest",
 ):
     xlo, ylo, xhi, yhi = bounds
+    # NOTE: linspace is inclusive of hi (endpoint=True is default), and
+    #       xarray treats coordinates as pixel centers.
     xs = np.linspace(xlo, xhi, size[1])
     ys = np.linspace(yhi, ylo, size[0])
     return arr.interp(x=xs, y=ys, method=method, kwargs={"fill_value": "extrapolate"})

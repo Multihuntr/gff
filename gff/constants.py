@@ -50,6 +50,9 @@ HYDROATLAS_CLIMATE_ZONE_NAMES = {
     17: "Extremely hot and xeric",
     18: "Extremely hot and moist",
 }
+HYDROATLAS_CLIMATE_ZONE_BAND_NAME = "clz_cl_smj"
+HYDROATLAS_RASTER_FNAME = "hydroatlas_lvl12.tif"
+COARSE_DEM_FNAME = "coarse_cop_dem.tif"
 DFO_INCLUDE_TYPES = [
     "Cyclone/storm",
     "Heavy Rain",

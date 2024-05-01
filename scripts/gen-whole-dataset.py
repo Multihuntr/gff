@@ -44,37 +44,6 @@ def parse_args(argv):
     return parser.parse_args(argv)
 
 
-def mk_expected(flood_distr: np.ndarray, n_sites: int, est_basins_per_site: int = 10):
-    """
-    Calculates how many sites we expect (min) for each continent/climate zone
-
-    returns { <continent>: {<climate_zone>: int} }
-    """
-    total = 0
-    for continent in gff.constants.HYDROATLAS_CONTINENT_NAMES:
-        if continent in flood_distr:
-            total += flood_distr[continent]["total"]
-    cont_ratio = n_sites / total
-    exp_cont_sites = {}
-    exp_cont_basins = collections.defaultdict(lambda: {})
-    for i, continent in enumerate(gff.constants.HYDROATLAS_CONTINENT_NAMES):
-        n_cont = flood_distr[continent]["total"] * cont_ratio
-        exp_cont_sites[continent] = int(n_cont)
-        for clim_zone in gff.constants.HYDROATLAS_CLIMATE_ZONE_NAMES:
-            if (
-                continent in flood_distr
-                and clim_zone in flood_distr[continent]["zones"]
-                and flood_distr[continent]["total"] > 0
-            ):
-                proportion = (
-                    flood_distr[continent]["zones"][clim_zone] / flood_distr[continent]["total"]
-                )
-                exp_cont_basins[continent][clim_zone] = int(
-                    proportion * n_cont * est_basins_per_site
-                )
-    return exp_cont_sites, exp_cont_basins
-
-
 def do_ks_assignments(agg_labels_path: Path, basins: geopandas.GeoDataFrame):
     # Count how many of each
     metas = collections.defaultdict(lambda: [])
@@ -93,7 +62,7 @@ def do_ks_assignments(agg_labels_path: Path, basins: geopandas.GeoDataFrame):
         geoms = geopandas.read_file(path.with_name(meta["visit_tiles"]), engine="pyogrio")
         geoms_union = shapely.ops.unary_union(geoms.geometry)
         geoms_union_4326 = gff.util.convert_crs(geoms_union, geoms.crs, "EPSG:4326")
-        overlap_counts = zone_counts_shp(basins, geoms_union_4326)
+        overlap_counts = gff.generate.basins.zone_counts_shp(basins, geoms_union_4326)
         for clim_zone, count in overlap_counts.iterrows():
             sites[continent][clim_zone] += count.item()
             tiles[continent][clim_zone] += len(geoms)
@@ -104,31 +73,6 @@ def do_ks_assignments(agg_labels_path: Path, basins: geopandas.GeoDataFrame):
         footprint_4326 = gff.util.convert_crs(footprint, geoms.crs, "EPSG:4326")
         when_where.append((d.timestamp(), footprint_4326))
     return metas, sites, tiles, when_where
-
-
-def get_this_lvl4(shp: shapely.Geometry, lvl4_basins: geopandas.GeoDataFrame):
-    with warnings.catch_warnings(action="ignore"):
-        # It complains because we're doing an area calculation in EPSG:4326,
-        # a non-area-preserving CRS. But, I don't care about the exact area.
-        which_basin = np.argmax(lvl4_basins.geometry.intersection(shp).area)
-    return lvl4_basins.iloc[which_basin]
-
-
-def zone_counts_shp(basins: geopandas.GeoDataFrame, shp: shapely.Geometry, threshold: float = 0.3):
-    overlaps = gff.generate.basins.overlaps_at_least(basins.geometry, shp, threshold)
-    overlap_basins = basins[overlaps]
-    return overlap_basins[["HYBAS_ID", "clz_cl_smj"]].groupby("clz_cl_smj").count()
-
-
-def estimate_zone_counts(
-    basins: geopandas.GeoDataFrame,
-    search_results: list[dict],
-    search_idx: list[int],
-    threshold: float = 0.3,
-):
-    results = [search_results[i] for i in search_idx]
-    footprint = gff.generate.util.search_result_footprint_intersection(results)
-    return zone_counts_shp(basins, footprint, threshold)
 
 
 def calc_completion(
@@ -208,7 +152,9 @@ def main(args):
     flood_distr = gff.generate.basins.flood_distribution(
         dfo, basins08_df, overlap_threshold=0.3, cache_path=flood_cache
     )
-    exp_cont_sites, exp_basin_distr = mk_expected(flood_distr, n_sites=args.sites)
+    exp_cont_sites, exp_basin_distr = gff.generate.basins.mk_expected_distribution(
+        flood_distr, n_sites=args.sites
+    )
 
     # Start by adding all kurosiwo labels to current distribution
     ks_metas, ks_sites, ks_tiles, ks_maps = do_ks_assignments(args.ks_agg_labels_path, basins08_df)
@@ -314,7 +260,9 @@ def main(args):
         wanted_tuplets = []
         for tuplet in safe_tuplets:
             # NOTE: This is a for loop because different tuplets overlap different areas
-            counts = estimate_zone_counts(basins08_df, approach_results, safe_tuplets[0])
+            counts = gff.generate.basins.estimate_zone_counts(
+                basins08_df, approach_results, safe_tuplets[0]
+            )
             wanted_zones = 0
             for clim_zone, count in counts.iterrows():
                 expected_count = exp_basin_distr[continent][clim_zone]
@@ -363,23 +311,21 @@ def main(args):
             ts = datetime.datetime.fromisoformat(meta["post_date"]).timestamp()
             existing_maps.append((ts, hull))
 
-            geoms = geopandas.read_file(folder / meta["visit_tiles"], engine="pyogrio")
-            overlap_counts = zone_counts_shp(basins08_df, shapely.ops.unary_union(geoms))
-            for clim_zone, count in overlap_counts.iterrows():
+            basin_counts = gff.generate.basins.zone_counts_shp(
+                basins08_df, shapely.ops.unary_union(geoms)
+            )
+            for clim_zone, count in basin_counts.iterrows():
                 if meta["flooding"]:
                     cur_basin_flood_distr[continent][clim_zone] += count.item()
                 else:
                     cur_basin_noflood_distr[continent][clim_zone] += count.item()
-
-                current_distr_tiles[continent][clim_zone] += len(geoms)
-            added_sites[continent].append(meta)
 
     distributions = {
         "floods": flood_distr,
         "expected": exp_basin_distr,
         "created": cur_basin_flood_distr,
         "negatives": cur_basin_noflood_distr,
-        "created_tiles": current_distr_tiles,
+        # "created_tiles": current_distr_tiles,
     }
     with open(args.data_path / "distributions.json", "w") as f:
         json.dump(distributions, f)

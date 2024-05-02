@@ -23,10 +23,12 @@ class DebugFloodForecastDataset(torch.utils.data.Dataset):
         self.data_sources = C["data_sources"]
 
         self.bogus_geom = shapely.Point([124.225, 9.9725])
-        # self.floodmaps = np.random.randint(0, 3, size=(self.n_examples, 1, 224, 224))
-        self.floodmaps = np.zeros((self.n_examples, 1, 224, 224), dtype=np.int64)
-        self.floodmaps[:, :, :112, :112] = 1
-        self.floodmaps[:, :, 112:, 112:] = 2
+        if C["checkerboard"]:
+            self.floodmaps = np.zeros((self.n_examples, 1, 224, 224), dtype=np.int64)
+            self.floodmaps[:, :, :112, :112] = 1
+            self.floodmaps[:, :, 112:, 112:] = 2
+        else:
+            self.floodmaps = np.random.randint(0, 3, size=(self.n_examples, 1, 224, 224))
 
         if "era5" in C["data_sources"]:
             n_era5 = len(C["era5_keys"])

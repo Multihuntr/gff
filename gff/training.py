@@ -22,6 +22,7 @@ def train_epoch(
     device = next(model.parameters()).device
     f1 = torchmetrics.classification.MulticlassF1Score(3, average="macro")
     f1.to(device)
+    model.train()
     for i, example in enumerate(tqdm.tqdm(dataloader, desc="Training", leave=False)):
         example = gff.util.recursive_todevice(example, device)
         targ = example.pop("floodmap")
@@ -37,12 +38,13 @@ def train_epoch(
         losses.append(loss_float)
         if ((i + 1) % scalar_freq) == 0:
             write_scalars(loss_float, this_f1.cpu().item())
-        if ((i + 1) & img_freq) == 0:
+        if ((i + 1) % img_freq) == 0:
             write_imgs(example, pred, targ)
     return sum(losses) / len(losses), f1.compute().cpu().item()
 
 
 def test_epoch(model, dataloader, criterion, limit: int = None):
+    model.eval()
     with torch.no_grad():
         losses = []
         device = next(model.parameters()).device
@@ -122,9 +124,7 @@ def auto_incr_img_writer_closure(writer):
 
 def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=None):
     optim = torch.optim.AdamW(model.parameters(), lr=C["lr"])
-    scheduler = torch.optim.lr_scheduler.MultiplicativeLR(
-        optim, lambda epoch: C["lr_decay"] ** epoch
-    )
+    scheduler = torch.optim.lr_scheduler.MultiplicativeLR(optim, lambda epoch: C["lr_decay"])
     start_epoch = 0
     if checkpoint is not None:
         model.load_state_dict(checkpoint["model"])

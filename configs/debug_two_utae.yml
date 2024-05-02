@@ -4,15 +4,15 @@ data_folder: ~/NFS_era5/gff
 #   era5: ~/NFS_era5/ERA5-daily
 #   era5_land: ~/NFS_era5/ERA5-Land-daily
 
-name: debug_everything
+name: debug_two_utae_random_data
 
-model: debug_model
+model: two_utae
 hydroatlas_dim: 16
 device: cuda:0
 
 dataset: debug_dataset
-checkerboard: True
-n_examples: 4
+checkerboard: False
+n_examples: 64
 n_times: 12
 data_sources:
   - era5
@@ -22,7 +22,7 @@ data_sources:
   - dem_local
   - s1
 
-batch_size: 1
+batch_size: 32
 lr: 0.001
 lr_decay: 0.9999
 epochs: 200

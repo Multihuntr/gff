@@ -54,6 +54,32 @@ def min_timing(group, ref_ts, n):
     return before >= n and after > 0
 
 
+def do_search(geom, start_date, end_date):
+    """Thin wrapper around asf.geo_search with project defaults"""
+    for x in range(3):
+        try:
+            search_results = asf.geo_search(
+                intersectsWith=geom.convex_hull.wkt,
+                platform=asf.PLATFORM.SENTINEL1,
+                processingLevel=asf.PRODUCT_TYPE.AMPLITUDE_GRD,
+                start=start_date,
+                end=end_date,
+            )
+
+            # Only include processing level GRD_HD
+            only_grd = [r for r in search_results if r.properties["processingLevel"] == "GRD_HD"]
+            only_grd.sort(key=lambda r: r.properties["startTime"])
+            geojsons = [result.geojson() for result in only_grd]
+            break
+        except json.JSONDecodeError:
+            backoff = 30
+            print(f"Search failed. Retrying in {backoff}s")
+            time.sleep(backoff)
+    else:
+        raise Exception("asf_search unavailable")
+    return geojsons
+
+
 def get_search_results(
     index: sqlite3.Connection, shp: geopandas.GeoSeries, proc_may_conflict: bool = True
 ):
@@ -66,30 +92,11 @@ def get_search_results(
         row = values[0]
         return json.loads(row[0])
 
+    # Do search of asf
     start_date = datetime.datetime.fromisoformat(shp["BEGAN"])
     end_date = datetime.datetime.fromisoformat(shp["ENDED"])
-
-    for x in range(3):
-        try:
-            buffer = datetime.timedelta(days=60)
-            search_results = asf.geo_search(
-                intersectsWith=shp.geometry.convex_hull.wkt,
-                platform=asf.PLATFORM.SENTINEL1,
-                processingLevel=asf.PRODUCT_TYPE.AMPLITUDE_GRD,
-                start=start_date - buffer,
-                end=end_date,
-            )
-            break
-        except json.JSONDecodeError:
-            backoff = 30
-            print(f"Search failed. Retrying in {backoff}s")
-            time.sleep(backoff)
-    else:
-        raise Exception("asf_search unavailable")
-    # Only include processing level GRD_HD
-    only_grd = [r for r in search_results if r.properties["processingLevel"] == "GRD_HD"]
-    only_grd.sort(key=lambda r: r.properties["startTime"])
-    geojsons = [result.geojson() for result in only_grd]
+    buffer = datetime.timedelta(days=60)
+    geojsons = do_search(shp.geometry, start_date - buffer, end_date)
 
     # Write them to the index
     db_row = {"key": k, "jsons": json.dumps(geojsons)}

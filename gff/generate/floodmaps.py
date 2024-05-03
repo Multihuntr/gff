@@ -303,19 +303,22 @@ def progressively_grow_floodmaps(
     if export_s1:
         s1_profile = {
             **ref_tif.profile,
-            "COMPRESS": "LERC",
-            "MAX_Z_ERROR": 0.0001,
-            "INTERLEAVE": "BAND",
+            **constants.S1_PROFILE_DEFAULTS,
             "transform": new_transform,
             "width": tile_grids[0, 0].shape[0] * tile_size,
             "height": tile_grids[0, 0].shape[1] * tile_size,
-            "BIGTIFF": "IF_NEEDED",
+            "BIGTIFF": "YES",
         }
         names = constants.KUROSIWO_S1_NAMES[-(len(inp_img_paths)) :]
         s1_folder = data_folder / "s1-export"
         s1_folder.mkdir(exist_ok=True)
-        s1_fpaths = [s1_folder / f"{floodmap_path.stem}_{n}.tif" for n in names]
-        s1_tifs = [rasterio.open(p, "w", **s1_profile) for p in s1_fpaths]
+        s1_tifs = []
+        for name in names:
+            s1_fpath = s1_folder / f"{floodmap_path.stem}_{name}.tif"
+            if s1_fpath.exists():
+                s1_tifs.append(rasterio.open(s1_fpath, "r+"))
+            else:
+                s1_tifs.append(rasterio.open(s1_fpath, "w", **s1_profile))
 
     # Begin flood-fill search
     visit_tiles, flood_tiles = [], []

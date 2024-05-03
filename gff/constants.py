@@ -16,6 +16,15 @@ FLOODMAP_PROFILE_DEFAULTS = {
     "PREDICTOR": 2,
     "count": 1,
     "dtype": np.uint8,
+    'nodata': 255,
+}
+S1_PROFILE_DEFAULTS = {
+    "COMPRESS": "LERC",
+    "MAX_Z_ERROR": 0.0001,
+    "INTERLEAVE": "BAND",  # https://github.com/OSGeo/gdal/issues/9530
+    "count": 2,
+    "dtype": np.float32,
+    "nodata": np.nan,
 }
 WORLDCOVER_PW_CLASS = 80
 

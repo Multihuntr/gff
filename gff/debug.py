@@ -22,6 +22,8 @@ def save_as_geojson(shps, fname="debug.geojson"):
     import json
     import shapely
 
+    if isinstance(shps, list):
+        shps = np.array(shps)
     if isinstance(shps, shapely.Geometry):
         shps = np.array([shps])
 

@@ -40,6 +40,7 @@ def parse_args(argv):
         default=None,
         help="If provided, will only try to generate floodmaps for this continent",
     )
+    parser.add_argument("--flood_model_names", "-m", nargs="+", type=str, default=["vit"])
 
     return parser.parse_args(argv)
 
@@ -180,8 +181,7 @@ def main(args):
 
     # Then we search through basins, ordered, and add them if there's not "enough"
     torch.set_grad_enabled(False)
-    # flood_model_names = ["vit", "snunet", "vit+snunet"]
-    flood_model_names = ["vit"]
+    flood_model_names = args.flood_model_names
     flood_models = [
         gff.generate.floodmaps.model_runner(name, args.data_path) for name in flood_model_names
     ]
@@ -215,6 +215,16 @@ def main(args):
         # Exit if we've added enough
         if basin_group_perc >= 1:
             print(complete_str)
+            calc_completion(
+                exp_basin_distr,
+                cur_basin_flood_distr,
+                cur_basin_noflood_distr,
+                exp_cont_sites,
+                added_sites,
+                len(basin_floods),
+                i,
+                args.continent,
+            )
             break
 
         key = f"{basin_row.ID}-{basin_row.HYBAS_ID}"

@@ -309,12 +309,13 @@ def progressively_grow_floodmaps(
             "height": tile_grids[0, 0].shape[1] * tile_size,
             "BIGTIFF": "YES",
         }
-        names = constants.KUROSIWO_S1_NAMES[-(len(inp_img_paths)) :]
         s1_folder = data_folder / "s1-export"
         s1_folder.mkdir(exist_ok=True)
         s1_tifs = []
-        for name in names:
+        s1_fpaths = []
+        for name in constants.KUROSIWO_S1_NAMES[-(len(inp_img_paths)) :]:
             s1_fpath = s1_folder / f"{floodmap_path.stem}_{name}.tif"
+            s1_fpaths.append(s1_fpath)
             if s1_fpath.exists():
                 s1_tifs.append(rasterio.open(s1_fpath, "r+"))
             else:

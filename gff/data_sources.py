@@ -15,6 +15,7 @@ import zipfile
 import asf_search as asf
 
 import geopandas
+import numpy as np
 import pandas
 import rasterio
 import shapely
@@ -283,13 +284,13 @@ def load_dfo(path: Path, for_s1: bool = False):
 def _era5_band_index(p: Path):
     band_index = {}
     with rasterio.open(p) as tif:
-        for i, name in tif.descriptions:
+        for i, name in enumerate(tif.descriptions):
             parts = name.split("-")
-            day = "-".join(parts[:2])
+            day = "-".join(parts[:3])
             k = parts[-1]
             if day not in band_index:
                 band_index[day] = {}
-            band_index[day][k] = i
+            band_index[day][k] = i + 1
     return band_index
 
 
@@ -304,16 +305,16 @@ def load_era5(
 ):
     if keys is None:
         if era5_land:
-            keys = constants.ERA5L_BAND
+            keys = constants.ERA5L_BANDS
         else:
             keys = constants.ERA5_BANDS
     results = []
     current = start
     while current <= end:
         if era5_land:
-            fname = f"era5-land-{current.year}-{current.month}.tif"
+            fname = f"era5-land-{current.year}-{current.month:02d}.tif"
         else:
-            fname = f"era5-{current.year}-{current.month}.tif"
+            fname = f"era5-{current.year}-{current.month:02d}.tif"
         band_index = _era5_band_index(folder / fname)
         day_str = current.strftime("%Y-%m-%d")
         band_idxs = [band_index[day_str][k] for k in keys]
@@ -327,7 +328,10 @@ def load_era5(
                 out_shape=(res, res),
                 resampling=rasterio.enums.Resampling.bilinear,
             )
-            data = data * tif.scales[:, None, None] + tif.offsets[:, None, None]
+            band_idxs0 = np.array(band_idxs) - 1  # Make them 0-indexed
+            scales = np.array(tif.scales)[band_idxs0, None, None]
+            offsets = np.array(tif.offsets)[band_idxs0, None, None]
+            data = data * scales + offsets
         results.append(data)
         current += datetime.timedelta(days=1)
 
@@ -335,11 +339,13 @@ def load_era5(
 
 
 def load_pregenerated_raster(
-    fpath: Path, geom: shapely.Geometry, res: int, keys: list[str] = None
+    fpath: Path, geom: shapely.Geometry, res: int, keys: list[str] | list[int] = None
 ):
     with rasterio.open(fpath) as tif:
         if keys is None:
-            band_idxs = list(range(len(tif.descriptions)))
+            band_idxs = list(range(1, len(tif.descriptions) + 1))
+        elif isinstance(keys[0], int):
+            band_idxs = keys
         else:
             band_idxs = [tif.descriptions.index(k) + 1 for k in keys]
         window = util.shapely_bounds_to_rasterio_window(geom.bounds, tif.transform, align=False)

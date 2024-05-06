@@ -6,13 +6,16 @@ ext_data_folders:
 
 name: two_utae
 
-model: debug_model
+model: two_utae
 hydroatlas_dim: 16
+lead_time_dim: 16
 device: cuda:0
 
 dataset: debug_dataset
+dataset: forecast_dataset
 split: 0
 floodmap: final
+use_exported_s1: False
 data_sources:
   - era5
   - era5_land
@@ -25,8 +28,9 @@ batch_size: 64
 lr: 0.001
 lr_decay: 0.97
 epochs: 20
-num_workers: 0
-write_freq: 64
+num_workers: 12
+scalar_freq: 64
+img_freq: 256
 
 hydroatlas_keys:
   - aet_mm_uyr

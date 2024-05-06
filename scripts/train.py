@@ -8,7 +8,7 @@ import yaml
 
 import gff.dataloaders
 import gff.evaluation
-import gff.models
+import gff.models.creation
 import gff.training
 import gff.util
 
@@ -59,7 +59,7 @@ def main(args):
     train_dl, test_dl = dataloaders = gff.dataloaders.create(C, g)
 
     # Train the model
-    model = gff.models.create(C)
+    model = gff.models.creation.create(C)
     model.to(C["device"])
     gff.training.training_loop(C, model_folder, model, dataloaders)
 

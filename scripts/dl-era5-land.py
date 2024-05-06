@@ -50,7 +50,7 @@ def _export_to_gdrive(img, fname):
     status = task.status()
     ssl_lock.release()
     start = time.time()
-    while status["state"] in ["PENDING", "READY", "RUNNING"]:
+    while status["state"] in ["UNSUBMITTED", "PENDING", "READY", "RUNNING"]:
         time.sleep(20)
         now = time.time()
         ssl_lock.acquire()
@@ -185,6 +185,11 @@ def get_new_band_names(dataset, prefix, band_names):
 def download_locally(year, month, dataset, gservice, local_folder, band_names, prefix):
     # Determine date range
     start_date = f"{year:04d}-{month:02d}"
+    fname = f"{prefix}-{start_date}"
+    local_fpath = local_folder / f"{fname}.tif"
+    if local_fpath.exists():
+        logging.info(f"[{fname}] Found locally; skipping entirely.")
+        return
     end_year = year + (month // 12)
     end_month = (month % 12) + 1
     end_date = f"{end_year:04d}-{end_month:02d}"
@@ -192,19 +197,15 @@ def download_locally(year, month, dataset, gservice, local_folder, band_names, p
     new_band_names = get_new_band_names(filtered_dataset, start_date, band_names)
 
     # Submit export job to google and wait until done
-    fname = f"{prefix}-{start_date}"
-    local_fpath = local_folder / f"{fname}.tif"
-    if local_fpath.exists():
-        logging.info(f"[{fname}] Found locally; skipping entirely.")
-        return
-
     existing_files = _get_files(gservice, fname)
     if len(existing_files) > 0:
         logging.info(f"[{fname}] Found on google drive; skipping request for export.")
     else:
         logging.info(f"[{fname}] Requesting export.")
         img = merge_dataset(filtered_dataset, new_band_names)
+        logging.info(f"[{fname}] Dataset merged.")
         _export_to_gdrive(img, fname)
+        logging.info(f"[{fname}] Export complete.")
 
     # google-api-python-client
     file_pointers = _download_by_fname(gservice, fname)
@@ -238,7 +239,7 @@ def parse_args():
         "--n_concurrent", type=int, default=3, help="how many concurrent requests to run"
     )
     parser.add_argument(
-        "--not-land", action="store_true", help="default: ERA5-Land, if provided, download ERA5"
+        "--not_land", action="store_true", help="default: ERA5-Land, if provided, download ERA5"
     )
 
     return parser.parse_args()

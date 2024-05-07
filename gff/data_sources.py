@@ -1,3 +1,4 @@
+import collections
 import datetime
 import functools
 import io
@@ -13,7 +14,7 @@ import tarfile
 import zipfile
 
 import asf_search as asf
-
+import einops
 import geopandas
 import numpy as np
 import pandas
@@ -205,6 +206,10 @@ def get_dem(shp, shp_crs, folder, name="COP-DEM_GLO-30-DTED__2023_1"):
         raise ValueError(f"Unknown DEM: '{name}'")
 
 
+if os.environ.get("CACHE_LOADED_TILES_IN_RAM", "no")[0].lower() == "y":
+    get_dem = functools.lru_cache(maxsize=3000)(get_dem)
+
+
 def download_s1(img_folder, asf_result, cred_fname=".asf_auth"):
     if not isinstance(asf_result, dict):
         asf_result = asf_result.geojson()
@@ -308,20 +313,29 @@ def load_era5(
             keys = constants.ERA5L_BANDS
         else:
             keys = constants.ERA5_BANDS
-    results = []
+    # Calculate the indices to read
+    n_bands = len(keys)
+    to_get = collections.defaultdict(lambda: [])
     current = start
     while current <= end:
         if era5_land:
             fname = f"era5-land-{current.year}-{current.month:02d}.tif"
         else:
             fname = f"era5-{current.year}-{current.month:02d}.tif"
+
         band_index = _era5_band_index(folder / fname)
         day_str = current.strftime("%Y-%m-%d")
         band_idxs = [band_index[day_str][k] for k in keys]
+        to_get[fname].append(band_idxs)
+        current += datetime.timedelta(days=1)
+
+    results = []
+    for fname, all_day_idxs in to_get.items():
         with rasterio.open(folder / fname) as tif:
             window = util.shapely_bounds_to_rasterio_window(
                 geom.bounds, tif.transform, align=False
             )
+            band_idxs = [idx for day_idxs in all_day_idxs for idx in day_idxs]
             data = tif.read(
                 band_idxs,
                 window=window,
@@ -329,11 +343,15 @@ def load_era5(
                 resampling=rasterio.enums.Resampling.bilinear,
             )
             band_idxs0 = np.array(band_idxs) - 1  # Make them 0-indexed
+
             scales = np.array(tif.scales)[band_idxs0, None, None]
             offsets = np.array(tif.offsets)[band_idxs0, None, None]
+            nan_mask = data == tif.nodata
             data = data * scales + offsets
-        results.append(data)
-        current += datetime.timedelta(days=1)
+            data[nan_mask] = np.nan
+            n_img = len(all_day_idxs)
+            data = einops.rearrange(data, "(I B) H W -> I B H W", I=n_img, B=n_bands)
+            results.extend(data)
 
     return results
 

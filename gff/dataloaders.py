@@ -74,36 +74,30 @@ class DebugFloodForecastDataset(torch.utils.data.Dataset):
         return example
 
 
+def meta_in_date_range(meta, valid_date_range, window):
+    start, end = valid_date_range
+    post_d = datetime.datetime.fromisoformat(meta["post_date"])
+    window_start = post_d - datetime.timedelta(days=window)
+    return (window_start.timestamp() >= start.timestamp()) and (
+        post_d.timestamp() <= end.timestamp()
+    )
+
+
 class FloodForecastDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         folder: Path,
-        ext_folders: list[Path],
         C: dict,
-        is_train: str,
-        split: int,
+        valid_date_range: tuple[datetime.datetime, datetime.datetime],
+        meta_fnames: list[str],
     ):
         self.folder = folder
-        self.ext_folders = ext_folders
         self.C = C
         self.floodmap_path = self.folder / "floodmaps" / self.C["floodmap"]
-        self.is_train = is_train
-        self.split = split
-        self.meta_fnames = self.read_partition()
+        self.valid_date_range = valid_date_range
+        self.meta_fnames = meta_fnames
         self.metas = self.load_tile_metas()
         self.tiles = self.load_tile_geoms(self.metas)
-
-    def read_partition(self):
-        # Split index defines the partition index to use as test.
-        test_partition_fname = f"floodmap_partition_{self.split}.txt"
-        partition_paths = list((self.folder / "partitions/").glob("floodmap_partition_?.txt"))
-        meta_fnames = []
-        for fpath in partition_paths:
-            partition_is_train = fpath.name != test_partition_fname
-            if self.is_train == partition_is_train:
-                fnames = pandas.read_csv(fpath, header=None)[0].values.tolist()
-                meta_fnames.extend(fnames)
-        return meta_fnames
 
     def mk_context_geom(self, geom: shapely.Geometry):
         w = h = gff.constants.CONTEXT_DEGREES
@@ -117,7 +111,8 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         for meta_fname in self.meta_fnames:
             with open(self.floodmap_path / meta_fname) as f:
                 meta = json.load(f)
-            metas.append(meta)
+            if meta_in_date_range(meta, self.valid_date_range, self.C["weather_window"]):
+                metas.append(meta)
         return metas
 
     def load_tile_geoms(self, metas: list[dict]):
@@ -168,7 +163,7 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         hybas_key = "HYBAS_ID" if "HYBAS_ID" in meta else "HYBAS_ID_4"
         continent = int(str(meta[hybas_key])[0])
         result = {
-            "floodmap": gff.util.get_tile(floodmap_path, geom.bounds),
+            "floodmap": gff.util.get_tile(floodmap_path, geom.bounds).astype(np.int64),
             "continent": continent,
             "geom": geom,
             "context_geom": context_geom,
@@ -181,10 +176,10 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         future_name = gff.constants.KUROSIWO_S1_NAMES[-1]
         # weather_start = datetime.datetime.fromisoformat(meta[f"{last_name}_date"])
         weather_end = datetime.datetime.fromisoformat(meta[f"{future_name}_date"])
-        weather_start = weather_end - datetime.timedelta(days=20)
+        weather_start = weather_end - datetime.timedelta(days=(self.C["weather_window"] - 1))
         if "era5_land" in self.C["data_sources"]:
             result["era5_land"] = gff.data_sources.load_era5(
-                self.ext_folders["era5_land"],
+                self.folder / gff.constants.ERA5L_FOLDER,
                 context_geom,
                 gff.constants.CONTEXT_RESOLUTION,
                 weather_start,
@@ -194,7 +189,7 @@ class FloodForecastDataset(torch.utils.data.Dataset):
             result["era5_land"] = np.array(result["era5_land"], dtype=np.float32)
         if "era5" in self.C["data_sources"]:
             result["era5"] = gff.data_sources.load_era5(
-                self.ext_folders["era5"],
+                self.folder / gff.constants.ERA5_FOLDER,
                 context_geom,
                 gff.constants.CONTEXT_RESOLUTION,
                 weather_start,
@@ -235,7 +230,8 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         return result
 
 
-def custom_collate_fn(original_batch, as_list=["continent", "geom", "context_geom"]):
+def sometimes_things_are_lists(original_batch, as_list=["continent", "geom", "context_geom"]):
+    """A custom collation function which lets things be lists instead of tensors"""
     keys = list(original_batch[0].keys())
     result = {key: [] for key in keys}
     for item in original_batch:
@@ -250,26 +246,82 @@ def custom_collate_fn(original_batch, as_list=["continent", "geom", "context_geo
     return result
 
 
+def read_partitions(folder: Path, test_partition: int):
+    # Split index defines the partition index to use as test.
+    val_partition = (test_partition + 1) % gff.constants.N_PARTITIONS
+    val_partition_fname = f"floodmap_partition_{val_partition}.txt"
+    test_partition_fname = f"floodmap_partition_{test_partition}.txt"
+    train_fnames = []
+    val_fnames = []
+    test_fnames = []
+    for fpath in list((folder / "partitions/").glob("floodmap_partition_?.txt")):
+        fnames = pandas.read_csv(fpath, header=None)[0].values.tolist()
+        if fpath.name == test_partition_fname:
+            test_fnames.extend(fnames)
+        elif fpath.name == val_partition_fname:
+            val_fnames.extend(fnames)
+        else:
+            train_fnames.extend(fnames)
+
+    return train_fnames, val_fnames, test_fnames
+
+
+def get_valid_date_range(folder, all_fnames):
+    era5_date_fmt = "%Y-%m"
+    # filenames like *-YYYY-mm.tif
+    era5_filenames = list((folder / gff.constants.ERA5_FOLDER).glob("*"))
+    era5_filenames.sort()
+    era5_start_str = "-".join(era5_filenames[0].stem.split("-")[-2:])
+    era5_start = datetime.datetime.strptime(era5_start_str, era5_date_fmt)
+    era5_end_str = "-".join(era5_filenames[-1].stem.split("-")[-2:])
+    era5_end = datetime.datetime.strptime(era5_end_str, era5_date_fmt)
+
+    era5L_filenames = list((folder / gff.constants.ERA5L_FOLDER).glob("*"))
+    era5L_filenames.sort()
+    era5L_start_str = "-".join(era5L_filenames[0].stem.split("-")[-2:])
+    era5L_start = datetime.datetime.strptime(era5L_start_str, era5_date_fmt)
+    era5L_end_str = "-".join(era5L_filenames[-1].stem.split("-")[-2:])
+    era5L_end = datetime.datetime.strptime(era5L_end_str, era5_date_fmt)
+
+    fname_dates = []
+    for fname in all_fnames:
+        # Ours is is FLOOD-BASIN-YYYY-MM-DD-YYYY-MM-DD-YYYY-MM-DD-meta.json
+        # kurosiwo is ACT_AOI_YYYY-MM-DD-meta.json
+        date_str = "-".join(fname.split("_")[-1].split("-")[-4:-1])
+        fname_dates.append(datetime.datetime.fromisoformat(date_str))
+    fname_dates.sort()
+    fname_start = fname_dates[0]
+    fname_end = fname_dates[-1]
+
+    start = max([era5_start, era5L_start, fname_start])
+    end = min([era5_end, era5L_end, fname_end])
+    return start, end
+
+
 def create(C, generator):
     data_folder = Path(C["data_folder"]).expanduser()
     if C["dataset"] == "debug_dataset":
         train_ds = DebugFloodForecastDataset(data_folder, C)
         test_ds = DebugFloodForecastDataset(data_folder, C)
     elif C["dataset"] == "forecast_dataset":
-        ext_data_folders = {k: Path(p).expanduser() for k, p in C["ext_data_folders"].items()}
-        train_ds = FloodForecastDataset(
-            data_folder, ext_data_folders, C, is_train=True, split=C["split"]
-        )
-        test_ds = FloodForecastDataset(
-            data_folder, ext_data_folders, C, is_train=False, split=C["split"]
-        )
+        train_fnames, val_fnames, test_fnames = read_partitions(data_folder, C["test_partition"])
+        all_fnames = sum([train_fnames, val_fnames, test_fnames], start=[])
+        valid_date_range = get_valid_date_range(data_folder, all_fnames)
+        train_ds = FloodForecastDataset(data_folder, C, valid_date_range, meta_fnames=train_fnames)
+        val_ds = FloodForecastDataset(data_folder, C, valid_date_range, meta_fnames=val_fnames)
+        test_ds = FloodForecastDataset(data_folder, C, valid_date_range, meta_fnames=test_fnames)
     else:
         raise NotImplementedError(f"Dataset {C['dataset']} not supported")
 
     kwargs = {k: C[k] for k in ["batch_size", "num_workers"]}
     train_dl = torch.utils.data.DataLoader(
-        train_ds, shuffle=True, **kwargs, generator=generator, collate_fn=custom_collate_fn
+        train_ds,
+        shuffle=True,
+        **kwargs,
+        generator=generator,
+        collate_fn=sometimes_things_are_lists,
     )
-    test_dl = torch.utils.data.DataLoader(test_ds, **kwargs, collate_fn=custom_collate_fn)
+    val_dl = torch.utils.data.DataLoader(val_ds, **kwargs, collate_fn=sometimes_things_are_lists)
+    test_dl = torch.utils.data.DataLoader(test_ds, **kwargs, collate_fn=sometimes_things_are_lists)
 
-    return train_dl, test_dl
+    return train_dl, val_dl, test_dl

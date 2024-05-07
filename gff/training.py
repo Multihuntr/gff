@@ -148,7 +148,7 @@ def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=Non
             model_folder / f"checkpoint_{epoch:03d}.th",
         )
 
-    train_dl, test_dl = dataloaders
+    train_dl, val_dl = dataloaders
     hoisted_epoch = start_epoch
     try:
         for epoch in tqdm.tqdm(range(start_epoch, C["epochs"]), desc="Training epochs"):
@@ -163,7 +163,7 @@ def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=Non
                 scalar_freq=C["scalar_freq"],
                 img_freq=C["img_freq"],
             )
-            test_loss, test_f1 = test_epoch(model, test_dl, criterion, limit=256)
+            test_loss, test_f1 = test_epoch(model, val_dl, criterion, limit=256)
 
             writer.add_scalar("Loss/train_epoch", train_loss, epoch)
             writer.add_scalar("F1/train_epoch", train_f1, epoch)

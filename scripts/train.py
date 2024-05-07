@@ -56,12 +56,12 @@ def main(args):
     # Prepare data loaders
     g = torch.Generator()
     g.manual_seed(C["seed"])
-    train_dl, test_dl = dataloaders = gff.dataloaders.create(C, g)
+    train_dl, val_dl, test_dl = gff.dataloaders.create(C, g)
 
     # Train the model
     model = gff.models.creation.create(C)
     model.to(C["device"])
-    gff.training.training_loop(C, model_folder, model, dataloaders)
+    gff.training.training_loop(C, model_folder, model, (train_dl, val_dl))
 
     # Evaluate the model
     eval_results = gff.evaluation.evaluate_model(model, test_dl)

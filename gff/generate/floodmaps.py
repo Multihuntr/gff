@@ -3,6 +3,7 @@ import functools
 import itertools
 import json
 import math
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -117,6 +118,14 @@ def load_metas(data_folder, cross_term, floodmap_folder):
     return metas
 
 
+def floodmap_tiles_from_meta(meta_path: Path):
+    with open(meta_path) as f:
+        meta = json.load(f)
+    v_path = meta_path.parent / meta["visit_tiles"]
+    visit_tiles = geopandas.read_file(v_path, engine="pyogrio", use_arrow=True)
+    return np.array(visit_tiles.geometry)
+
+
 def create_flood_maps(
     data_folder,
     search_results,
@@ -127,6 +136,7 @@ def create_flood_maps(
     n_img=3,
     floodmap_folder=None,
     search_idxs=None,
+    prescribed_tiles=None,
 ):
     """
     Creates flood maps for a single basin x flood shape by starting along rivers
@@ -144,7 +154,8 @@ def create_flood_maps(
 
     # How to choose combinations of S1? Who knows? *shrug*
     # Pick the first triplet, then, if no flooding, choose the next triplet
-
+    msg = "Cannot prescribe tiles if search_idxs are not also prescribed"
+    assert (search_idxs is None and prescribed_tiles is None) or search_idxs is not None, msg
     if search_idxs is None:
         search_idxs = gff.generate.util.find_intersecting_tuplets(search_results, basin_row, n_img)
         if search_idxs is None:
@@ -152,7 +163,7 @@ def create_flood_maps(
             return
 
     metas = []
-    for search_idx in search_idxs:
+    for map_idx, search_idx in enumerate(search_idxs):
         results_group = [search_results[i] for i in search_idx]
 
         s1_img_paths = []
@@ -177,6 +188,10 @@ def create_flood_maps(
             abs_floodmap_folder = data_folder / "floodmaps"
         abs_floodmap_folder.mkdir(exist_ok=True)
         viable_footprint = gff.generate.util.search_result_footprint_intersection(results_group)
+        if prescribed_tiles is not None:
+            this_prescribed_tiles = prescribed_tiles[map_idx]
+        else:
+            this_prescribed_tiles = None
         visit_tiles, flood_tiles, s1_export_paths = progressively_grow_floodmaps(
             s1_img_paths,
             rivers_df,
@@ -186,6 +201,7 @@ def create_flood_maps(
             export_s1=export_s1,
             print_freq=200,
             viable_footprint=viable_footprint,
+            prescribed_tiles=this_prescribed_tiles,
         )
 
         meta = {
@@ -247,6 +263,7 @@ def progressively_grow_floodmaps(
     print_freq: int = 0,
     viable_footprint: shapely.Geometry = None,
     max_tiles: int = 2500,
+    prescribed_tiles: np.ndarray[shapely.Geometry] = None,
 ):
     """
     First run flood_model along riverway from geom, then expand the search as flooded areas are found.
@@ -266,20 +283,17 @@ def progressively_grow_floodmaps(
     # Create tile_grid and initial set of tiles
     tile_grids, footprint_box = mk_grid(viable_footprint, ref_tif.transform, tile_size)
     grid_size = tile_grids[(0, 0)].shape
-    tiles = create_initial_tiles(
-        rivers_df,
-        viable_footprint,
-        tile_grids[(0, 0)],
-        ref_tif.crs,
-        min_river_size=500,
-        max_tiles=200,
-    )
-    # Expand a small area around the river tiles
-    for tile_x, tile_y in tiles.copy():
-        new_tiles = sel_new_tiles_big_window(tile_x, tile_y, *grid_size, add=2)
-        for tile in new_tiles:
-            if tile not in tiles:
-                tiles.append(tile)
+    if prescribed_tiles is None:
+        tiles = create_initial_tiles(
+            rivers_df,
+            viable_footprint,
+            tile_grids[(0, 0)],
+            ref_tif.crs,
+            min_river_size=500,
+            max_tiles=200,
+        )
+    else:
+        tiles = get_grid_idx(tile_grids[(0, 0)], prescribed_tiles)
 
     visited = np.zeros_like(tile_grids[(0, 0)]).astype(bool)
     offset_cache = {(0, 1): {}, (1, 0): {}, (1, 1): {}}
@@ -515,11 +529,26 @@ def create_initial_tiles(rivers_df, geom, tile_grid, crs, min_river_size=500, ma
             min_river_size=0,
             max_tiles=min_river_size,
         )
+    gw, gh = grid_size = tile_grid.shape
     if len(tiles) == 0:
         # Then, if there's still no tiles, just use the centre of the footprint.
-        gw, gh = grid_size = tile_grid.shape
         tiles = sel_new_tiles_big_window(gw // 2, gh // 2, *grid_size, add=3)
+
+    # Expand a small area around the river tiles
+    for tile_x, tile_y in tiles.copy():
+        new_tiles = sel_new_tiles_big_window(tile_x, tile_y, *grid_size, add=2)
+        for tile in new_tiles:
+            if tile not in tiles:
+                tiles.append(tile)
     return tiles
+
+
+def get_grid_idx(grid, tile_geoms):
+    # grid shaped [W, H], tile_geoms shaped [N]
+    tiles_combined = shapely.unary_union(tile_geoms)
+    tile_area = grid[0, 0].area
+    tiles_incl = shapely.area(shapely.intersection(grid, tiles_combined)) > (0.01 * tile_area)
+    return list(zip(*tiles_incl.nonzero()))
 
 
 def _ensure_logits(tifs, offset_tile_grid, x, y, flood_model, offset_cache):
@@ -743,7 +772,7 @@ def run_snunet_once(
         return inps, None, None
     dem_fine = util.resample_xr(dem_coarse, geom_4326.bounds, inps[0].shape[2:])
     dem_np = dem_fine.band_data.values
-    out = model(inps, dem=dem_np)[0].cpu().numpy()
+    out = model(tuple(inps), dem=dem_np)[0].cpu().numpy()
     return inps, dem_np, out
 
 
@@ -751,7 +780,7 @@ def run_flood_vit_once(
     imgs, geom: shapely.Geometry, model: torch.nn.Module, geom_in_px: bool = False
 ):
     inps = util.get_tiles_single(imgs, geom, geom_in_px)
-    out = model(inps)[0].cpu().numpy()
+    out = model(tuple(inps))[0].cpu().numpy()
     return inps, None, out
 
 
@@ -773,8 +802,8 @@ def run_flood_vit_and_snunet_once(
         return inps, None, None
     dem_fine = util.resample_xr(dem_coarse, geom_4326.bounds, inps[0].shape[2:])
     dem_th = dem_fine.band_data.values
-    vit_out = vit_model(inps)[0].cpu().numpy()
-    snunet_out = snunet_model(inps[-2:], dem=dem_th)[0].cpu().numpy()
+    vit_out = vit_model(tuple(inps))[0].cpu().numpy()
+    snunet_out = snunet_model(tuple(inps[-2:]), dem=dem_th)[0].cpu().numpy()
     out = (vit_out + snunet_out) / 2
     return inps, dem_th, out
 
@@ -788,29 +817,41 @@ def run_flood_vit_batched(
 
 
 def vit_decoder_runner():
-    flood_model = torch.hub.load("Multihuntr/KuroSiwo", "vit_decoder", pretrained=True).cuda()
-    run_flood_model = lambda tifs, geom: run_flood_vit_once(tifs, geom, flood_model)
+    run_flood_model = lambda tifs, geom: run_flood_vit_once(tifs, geom, vit_model)
     return run_flood_model
 
 
 def snunet_runner(crs, folder):
-    flood_model = torch.hub.load("Multihuntr/KuroSiwo", "snunet", pretrained=True).cuda()
     run_flood_model = lambda tifs, geom: run_snunet_once(
-        tifs[-2:], geom, flood_model, folder, geom_crs=crs
+        tifs[-2:], geom, snunet_model, folder, geom_crs=crs
     )
     return run_flood_model
 
 
 def average_vit_snunet_runner(crs, folder):
-    vit_model = torch.hub.load("Multihuntr/KuroSiwo", "vit_decoder", pretrained=True).cuda()
-    snunet_model = torch.hub.load("Multihuntr/KuroSiwo", "snunet", pretrained=True).cuda()
     run_flood_model = lambda tifs, geom: run_flood_vit_and_snunet_once(
         tifs, geom, vit_model, snunet_model, folder, geom_crs=crs
     )
     return run_flood_model
 
 
+vit_model = None
+snunet_model = None
+
+
 def model_runner(name: str, data_folder: Path):
+    global vit_model
+    global snunet_model
+
+    if "vit" in name and vit_model is None:
+        vit_model = torch.hub.load("Multihuntr/KuroSiwo", "vit_decoder", pretrained=True).cuda()
+        if os.environ.get("CACHE_MODEL_OUTPUTS", "no")[0].lower() == "y":
+            vit_model = util.np_cache(maxsize=3000)(vit_model)
+    if "snunet" in name and snunet_model is None:
+        snunet_model = torch.hub.load("Multihuntr/KuroSiwo", "snunet", pretrained=True).cuda()
+        if os.environ.get("CACHE_MODEL_OUTPUTS", "no")[0].lower() == "y":
+            snunet_model = util.np_cache(maxsize=3000)(snunet_model)
+
     if name == "vit":
         run_flood_model = vit_decoder_runner()
     elif name == "snunet":
@@ -826,7 +867,6 @@ def postprocess(data_folder, in_fpath, out_fpath, tiles, nodata, **kwargs):
     """
     Postprocessing:
     - Clean up the edges
-    - Paste worldcover permanent water class
     """
     with rasterio.open(in_fpath) as out_tif:
         floodmaps = out_tif.read()
@@ -835,8 +875,6 @@ def postprocess(data_folder, in_fpath, out_fpath, tiles, nodata, **kwargs):
     nan_mask = floodmaps == nodata
 
     floodmaps = postprocess_classes(floodmaps[0], mask=(~nan_mask)[0], **kwargs)[None]
-    folder = data_folder / "worldcover"
-    postprocess_world_cover(floodmaps, tiles, profile["transform"], profile["crs"], folder)
 
     floodmaps[nan_mask] = nodata
     with rasterio.open(out_fpath, "w", **profile) as out_tif:

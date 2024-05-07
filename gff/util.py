@@ -1,4 +1,5 @@
 import datetime
+import functools
 import json
 import math
 import os
@@ -176,6 +177,10 @@ def get_tile(
     return result
 
 
+if os.environ.get("CACHE_LOADED_TILES_IN_RAM", "no")[0].lower() == "y":
+    get_tile = functools.lru_cache(maxsize=16384)(get_tile)
+
+
 def get_tiles_single(imgs, geom: shapely.Geometry, geom_in_px: bool = False):
     """Get window from a list of images for a single model run"""
     inps = []
@@ -295,3 +300,57 @@ def seed_packages(seed):
 
 def parse_date(date_str):
     return datetime.datetime.strptime(date_str, "%Y-%m-%d")
+
+
+def np_cache(maxsize=128):
+    def wrapper(function):
+        hash_table = {}
+        rotating_buffer = []
+
+        def cache_clear():
+            nonlocal hash_table
+            nonlocal rotating_buffer
+            hash_table = {}
+            rotating_buffer = []
+
+        cache_info = {
+            "hits": 0,
+            "misses": 0,
+        }
+
+        def inner(*args, **kwargs):
+            # Calculate hash key
+            hash_key = 0
+            for arg in args + tuple(kwargs.values()):
+                if isinstance(arg, np.ndarray) or isinstance(arg, torch.Tensor):
+                    hash_key += arg.sum()
+                else:
+                    hash_key += hash(args)
+
+            # Exit with cache hit
+            if hash_key in hash_table:
+                buffer_idx = rotating_buffer.index(hash_key)
+                rotating_buffer.pop(buffer_idx)
+                rotating_buffer.append(hash_key)
+                cache_info["hits"] += 1
+                return hash_table[hash_key]
+
+            # Run function
+            result = function(*args, **kwargs)
+            cache_info["misses"] += 1
+
+            # Update cache
+            if len(rotating_buffer) >= maxsize:
+                old_key = rotating_buffer.pop(0)
+                del hash_table[old_key]
+            hash_table[hash_key] = result
+            rotating_buffer.append(hash_key)
+            return result
+
+        inner.cache_clear = cache_clear
+        inner.cache_info = cache_info
+        inner.__wrapped__ = function
+
+        return inner
+
+    return wrapper

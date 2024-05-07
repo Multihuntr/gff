@@ -4,6 +4,11 @@ import torch.nn as nn
 from . import utae
 
 
+def nans_to_zero(t: torch.Tensor):
+    t[torch.isnan(t)] = 0
+    return t
+
+
 class TwoUTAE(nn.Module):
     def __init__(
         self,
@@ -96,6 +101,12 @@ class TwoUTAE(nn.Module):
             example_local = ex["dem_local"]
         fH, fW = example_local.shape[-2:]
 
+        # These inputs might have nan
+        # TODO: Apply standardisation on all inputs before running
+        nans_to_zero(ex["dem_context"])
+        nans_to_zero(ex["dem_local"])
+        nans_to_zero(ex["era5_land"])
+
         # Process context inputs
         context_statics_lst = []
         if self.w_hydroatlas_basin:
@@ -111,7 +122,6 @@ class TwoUTAE(nn.Module):
             context_inp = torch.cat([ex["era5_land"], ex["era5"], context_statics], dim=2)
         else:
             context_inp = torch.cat([ex["era5_land"], ex["era5"]], dim=2)
-        print("context:", context_inp.shape)
         context_embedded = self.context_embed(context_inp, batch_positions)
 
         # Select the central 2x2 pixels and average
@@ -136,8 +146,8 @@ class TwoUTAE(nn.Module):
         local_inp = torch.cat(local_lst, dim=1)
         # Pretend it's temporal data with one time step for utae
         local_inp = local_inp[:, None]
-        print("local:  ", local_inp.shape)
         out = self.local_embed(local_inp, batch_positions[:, :1], lead=lead)
+        out = out[:, 0]
         return out
 
 

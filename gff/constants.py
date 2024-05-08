@@ -7,6 +7,7 @@ KUROSIWO_FLOOD_CLASS = KUROSIWO_CLASS_NAMES.index("flood")
 KUROSIWO_S1_NAMES = ["pre2", "pre1", "post"]
 LAST_PRE_S1_NAME = KUROSIWO_S1_NAMES[-2]
 FLOODMAP_BLOCK_SIZE = 224
+WORLDCOVER_PW_CLASS = 80
 # For some reason PACKBITS wasn't compressing very well.
 # Disk size scaled by regions of nodata.
 # Back to DEFLATE :shrug:
@@ -17,6 +18,10 @@ FLOODMAP_PROFILE_DEFAULTS = {
     "count": 1,
     "dtype": np.uint8,
     "nodata": 255,
+    "tiled": True,
+    "blockxsize": FLOODMAP_BLOCK_SIZE,
+    "blockysize": FLOODMAP_BLOCK_SIZE,
+    "INTERLEAVE": "PIXEL",
 }
 S1_PROFILE_DEFAULTS = {
     "COMPRESS": "LERC",
@@ -25,8 +30,10 @@ S1_PROFILE_DEFAULTS = {
     "count": 2,
     "dtype": np.float32,
     "nodata": np.nan,
+    "tiled": True,
+    "blockxsize": FLOODMAP_BLOCK_SIZE,
+    "blockysize": FLOODMAP_BLOCK_SIZE,
 }
-WORLDCOVER_PW_CLASS = 80
 
 HYDROATLAS_CONTINENT_NAMES = {
     1: "Africa",

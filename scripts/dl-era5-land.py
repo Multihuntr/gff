@@ -126,6 +126,8 @@ def _reprocess_to_16bit(file_pointers, out_fpath, new_band_names):
         "dtype": "int16",
         "nodata": -32767,
         "BIGTIFF": "YES",
+        "TILE_XSIZE": 48,
+        "TILE_YSIZE": 48,
     }
     with rasterio.open(out_fpath, "w", **out_profile) as out_f:
         band_idxs = list(range(1, 1 + tifs[0].count))

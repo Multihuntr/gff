@@ -336,7 +336,7 @@ def progressively_grow_floodmaps(
                 s1_tifs.append(rasterio.open(s1_fpath, "w", **s1_profile))
 
     # Begin flood-fill search
-    visit_tiles, flood_tiles = [], []
+    visit_tiles, fill_tiles, flood_tiles = [], [], []
     raw_floodmap_path = floodmap_path.with_stem(floodmap_path.stem + "-raw")
     with rasterio.open(raw_floodmap_path, "w", **profile) as out_tif:
         n_visited = 0
@@ -372,6 +372,7 @@ def progressively_grow_floodmaps(
                 for s1_tif, s1_inp_tile in zip(s1_tifs, s1_inps):
                     s1_tif.write(s1_inp_tile, window=window)
             out_tif.write(flood_cls, window=window)
+            fill_tiles.append(tile_geom)
 
             # Select new potential tiles (if not visited)
             if ((flood_cls == constants.KUROSIWO_PW_CLASS).mean() > 0.5) or (
@@ -410,8 +411,8 @@ def progressively_grow_floodmaps(
         tif.close()
 
     print(" Tile search complete. Postprocessing outputs.")
-    postprocess(data_folder, raw_floodmap_path, floodmap_path, visit_tiles, nodata=floodmap_nodata)
-    return visit_tiles, flood_tiles, s1_fpaths
+    postprocess(data_folder, raw_floodmap_path, floodmap_path, fill_tiles, nodata=floodmap_nodata)
+    return fill_tiles, flood_tiles, s1_fpaths
 
 
 def remove_tiles_outside(meta_path: Path, basins_df: geopandas.GeoDataFrame):

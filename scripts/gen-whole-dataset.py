@@ -355,6 +355,8 @@ def main(args):
             added_sites[continent].append(meta)
             geoms = geopandas.read_file(folder / meta["visit_tiles"], engine="pyogrio")
             hull = shapely.convex_hull(shapely.union_all(geoms.geometry))
+            if shapely.is_empty(hull):
+                continue
             ts = datetime.datetime.fromisoformat(meta["post_date"]).timestamp()
             existing_maps.append((ts, hull))
 

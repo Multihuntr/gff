@@ -79,8 +79,8 @@ def main(args):
 
                 tiles1 = np.array([shapely.Polygon(t) for t in meta1["visit_tiles"]])
                 tiles2 = np.array([shapely.Polygon(t) for t in meta2["visit_tiles"]])
-                tiles1_px = util.convert_affine_inplace(tiles1.copy(), ~tif1.transform)
-                tiles2_px = util.convert_affine_inplace(tiles2.copy(), ~tif1.transform)
+                tiles1_px = util.convert_affine(tiles1.copy(), ~tif1.transform)
+                tiles2_px = util.convert_affine(tiles2.copy(), ~tif1.transform)
                 tiles1_px_int = set(util.convert_shp_inplace(tiles1_px, lambda c: np.round(c)))
                 tiles2_px_int = set(util.convert_shp_inplace(tiles2_px, lambda c: np.round(c)))
                 tiles_union += len(tiles1_px_int.union(tiles2_px_int))

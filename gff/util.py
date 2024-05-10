@@ -35,6 +35,19 @@ def rounded_bounds(arg, outer=True):
 
 
 def shapely_bounds_to_rasterio_window(bounds, transform=None, align=True):
+    """
+    Converts a shapely bounds (xlo, ylo, xhi, yhi)
+    into a rasterio window tuple ((ylo, yhi), (xlo, xhi)).
+
+    If transform is provided, the bounds are assumed to be in a CRS, and it
+    will convert them to pixel-space before returning.
+
+    If aligned, will enforce that it's rounded to the nearest pixel.
+    Generally you want to align for writing, but not align for reading.
+    This is because rasterio's write always rounds down, but it's read doesn't.
+    So, if you try to write to ((0, 9.9999999), (0, 10)),
+    it will only write to ((0, 9), (0, 10)).
+    """
     xlo, ylo, xhi, yhi = bounds
 
     # If transform is provided, assume bounds are in CRS and convert to pixel-space
@@ -114,15 +127,17 @@ def convert_crs(shp: Union[shapely.Geometry, np.ndarray], _from: str, _to: str):
         return shapely.ops.transform(project, shp)
     else:
         op = lambda xy: np.stack(project(xy[..., 0], xy[..., 1]), axis=-1)
-        return convert_shp_inplace(shp.copy(), op)
+        return convert_shp(shp, op)
 
 
-def convert_affine_inplace(shp, transform: affine.Affine, dtype=np.float64):
+def convert_affine(shp, transform: affine.Affine, dtype=np.float64):
     op = lambda coords: np.array(transform * coords.T, dtype=dtype).T
-    return convert_shp_inplace(shp, op)
+    return convert_shp(shp, op)
 
 
-def convert_shp_inplace(shp, op: callable):
+def convert_shp(shp, op: callable):
+    if isinstance(shp, np.ndarray):
+        shp = shp.copy()
     coords = shapely.get_coordinates(shp).astype(np.float64)
     coords_transformed = op(coords)
     shp = shapely.set_coordinates(shp, coords_transformed)

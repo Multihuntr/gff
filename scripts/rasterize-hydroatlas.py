@@ -95,7 +95,7 @@ def main(args):
     ref_grid = gff.util.mk_box_grid(width, height)
     ref_grid_flat = ref_grid.ravel()
     ref_grid_indices = np.stack([g.ravel() for g in np.indices(ref_grid.shape)], axis=-1)
-    gff.util.convert_affine_inplace(ref_grid, transform, dtype=np.float64)
+    ref_grid = gff.util.convert_affine(ref_grid, transform, dtype=np.float64)
     pixel_area = ref_grid[0, 0].area
 
     # Split apart dataframe into different types of variables

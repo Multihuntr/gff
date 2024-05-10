@@ -126,8 +126,8 @@ def _reprocess_to_16bit(file_pointers, out_fpath, new_band_names):
         "dtype": "int16",
         "nodata": -32767,
         "BIGTIFF": "YES",
-        "TILE_XSIZE": 48,
-        "TILE_YSIZE": 48,
+        "TILEXSIZE": 48,
+        "TILEYSIZE": 48,
     }
     with rasterio.open(out_fpath, "w", **out_profile) as out_f:
         band_idxs = list(range(1, 1 + tifs[0].count))
@@ -205,7 +205,6 @@ def download_locally(year, month, dataset, gservice, local_folder, band_names, p
     else:
         logging.info(f"[{fname}] Requesting export.")
         img = merge_dataset(filtered_dataset, new_band_names)
-        logging.info(f"[{fname}] Dataset merged.")
         _export_to_gdrive(img, fname)
         logging.info(f"[{fname}] Export complete.")
 
@@ -253,7 +252,7 @@ def parse_args():
 # and some band names have "_sum" appended to the end
 START_DATE = "2014-01-01"  # Format: YYYY-MM-DD
 END_DATE = "2023-01-01"  # Format: YYYY-MM-DD
-YEAR_RANGE = range(2014, 2024)
+YEAR_RANGE = range(2013, 2024)
 MONTH_RANGE = range(1, 13)
 SANS_ANTARCTICA = shapely.polygons([[[-179, 85], [179, 85], [179, -60], [-179, -60]]])
 

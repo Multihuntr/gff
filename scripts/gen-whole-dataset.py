@@ -369,7 +369,7 @@ def main(args):
                 else:
                     cur_basin_noflood_distr[continent][clim_zone] += count.item()
 
-    if args.continent is None:
+    if args.continent is not None:
         out_txt = args.data_path / f"exported_metas_{args.continent}.txt"
     else:
         out_txt = args.data_path / f"exported_metas.txt"

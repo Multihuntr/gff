@@ -74,7 +74,7 @@ class DebugFloodForecastDataset(torch.utils.data.Dataset):
         return example
 
 
-def meta_in_date_range(meta, valid_date_range, window):
+def meta_in_date_range(meta: dict, valid_date_range: tuple, window: int):
     start, end = valid_date_range
     post_d = datetime.datetime.fromisoformat(meta["post_date"])
     window_start = post_d - datetime.timedelta(days=window)
@@ -275,7 +275,7 @@ def get_valid_date_range(folder, all_fnames, weather_window: int):
     era5_filenames.sort()
     era5_start_str = "-".join(era5_filenames[0].stem.split("-")[-2:])
     era5_start = datetime.datetime.strptime(era5_start_str, era5_date_fmt)
-    era5_start -= weather_delta
+    era5_start += weather_delta
     era5_end_str = "-".join(era5_filenames[-1].stem.split("-")[-2:])
     era5_end = datetime.datetime.strptime(era5_end_str, era5_date_fmt)
 
@@ -283,7 +283,7 @@ def get_valid_date_range(folder, all_fnames, weather_window: int):
     era5L_filenames.sort()
     era5L_start_str = "-".join(era5L_filenames[0].stem.split("-")[-2:])
     era5L_start = datetime.datetime.strptime(era5L_start_str, era5_date_fmt)
-    era5L_start -= weather_delta
+    era5L_start += weather_delta
     era5L_end_str = "-".join(era5L_filenames[-1].stem.split("-")[-2:])
     era5L_end = datetime.datetime.strptime(era5L_end_str, era5_date_fmt)
 
@@ -294,8 +294,13 @@ def get_valid_date_range(folder, all_fnames, weather_window: int):
         date_str = "-".join(fname.split("_")[-1].split("-")[-4:-1])
         fname_dates.append(datetime.datetime.fromisoformat(date_str))
     fname_dates.sort()
-    fname_start = fname_dates[0]
-    fname_end = fname_dates[-1]
+    if len(all_fnames) > 0:
+        fname_start = fname_dates[0]
+        fname_end = fname_dates[-1]
+    else:
+        # If no fnames provided, limit date range to just era5 files
+        fname_start = era5L_start
+        fname_end = era5L_end
 
     start = max([era5_start, era5L_start, fname_start])
     end = min([era5_end, era5L_end, fname_end])

@@ -475,8 +475,7 @@ def mk_grid(geom: shapely.Geometry, transform: affine.Affine, gridsize: int):
     }
 
     # Then translate grid back into CRS so that they align correctly across images
-    for grid in grids.values():
-        util.convert_affine_inplace(grid, transform, dtype=np.float64)
+    grids = {k: util.convert_affine(grid, transform) for k, grid in grids.items()}
     # The geom is then aligned to the pixels in the reference tif to ensure no resampling
     new_geom = shapely.box(xlo, ylo, xhi, yhi)
     pixel_aligned_geom = shapely.ops.transform(

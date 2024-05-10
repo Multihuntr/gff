@@ -302,12 +302,14 @@ def _era5_band_index(p: Path):
 def load_era5(
     folder: Path,
     geom: shapely.Geometry,
-    res: int,
+    res: int | tuple[int, int],
     start: datetime.datetime,
     end: datetime.datetime,
     keys: list[str] = None,
     era5_land: bool = True,
 ):
+    if isinstance(res, int):
+        res = (res, res)
     if keys is None:
         if era5_land:
             keys = constants.ERA5L_BANDS
@@ -330,6 +332,7 @@ def load_era5(
         current += datetime.timedelta(days=1)
 
     results = []
+    out_keys = []
     for fname, all_day_idxs in to_get.items():
         with rasterio.open(folder / fname) as tif:
             window = util.shapely_bounds_to_rasterio_window(
@@ -339,10 +342,12 @@ def load_era5(
             data = tif.read(
                 band_idxs,
                 window=window,
-                out_shape=(res, res),
+                out_shape=res,
                 resampling=rasterio.enums.Resampling.bilinear,
             )
             band_idxs0 = np.array(band_idxs) - 1  # Make them 0-indexed
+            for i in band_idxs0:
+                out_keys.append(tif.descriptions[i])
 
             scales = np.array(tif.scales)[band_idxs0, None, None]
             offsets = np.array(tif.offsets)[band_idxs0, None, None]
@@ -353,7 +358,7 @@ def load_era5(
             data = einops.rearrange(data, "(I B) H W -> I B H W", I=n_img, B=n_bands)
             results.extend(data)
 
-    return results
+    return out_keys, results
 
 
 def load_pregenerated_raster(
@@ -378,7 +383,7 @@ def load_pregenerated_raster(
 def get_climate_zone(folder: Path, geom: shapely.Geometry):
     fpath = folder / constants.HYDROATLAS_RASTER_FNAME
     with rasterio.open(fpath) as tif:
-        px = util.convert_affine_inplace(geom.centroid, ~tif.transform)
+        px = util.convert_affine(geom.centroid, ~tif.transform)
         x, y = shapely.get_coordinates(px)[0]
         window = ((y, y + 1), (x, x + 1))
         band_idx = 1 + tif.descriptions.index(constants.HYDROATLAS_CLIMATE_ZONE_BAND_NAME)

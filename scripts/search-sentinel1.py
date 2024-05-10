@@ -1,3 +1,5 @@
+raise NotImplementedError("This code is out of date. Use at your own risk.")
+
 import argparse
 import datetime
 import json

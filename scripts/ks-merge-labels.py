@@ -173,8 +173,11 @@ def main(args):
                         if mask:
                             continue
                         # Add S1 tile
+                        geom_in_inp_crs = gff.util.convert_crs(
+                            geom, s1_profile["crs"], s1_in_tif.crs
+                        )
                         s1_in_window = gff.util.shapely_bounds_to_rasterio_window(
-                            geom.bounds, s1_in_tif.transform, align=False
+                            geom_in_inp_crs.bounds, s1_in_tif.transform, align=False
                         )
                         s1_out_window = gff.util.shapely_bounds_to_rasterio_window(
                             geom.bounds, s1_out_tif.transform

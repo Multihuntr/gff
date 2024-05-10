@@ -95,7 +95,7 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         self.C = C
         self.floodmap_path = self.folder / "floodmaps" / self.C["floodmap"]
         self.valid_date_range = valid_date_range
-        self.meta_fnames = meta_fnames
+        self.meta_fnames = sorted(meta_fnames)
         self.metas = self.load_tile_metas()
         self.tiles = self.load_tile_geoms(self.metas)
 
@@ -141,8 +141,8 @@ class FloodForecastDataset(torch.utils.data.Dataset):
 
         date_str = datetime.datetime.fromisoformat(meta["pre1_date"]).strftime("%Y-%m-%d")
         if meta["type"] == "kurosiwo":
-            fname = f"{meta['info']['actiid']}-{meta['info']['aoiid']}-{date_str}.tif"
-            s1_fname = "kurosiwo" / fname
+            fname = f"{meta['info']['actid']}-{meta['info']['aoiid']}-{date_str}.tif"
+            s1_fname = Path("kurosiwo") / fname
         elif meta["type"] == "generated":
             s1_fname = f"{meta['FLOOD']}-{meta['HYBAS_ID']}-{date_str}.tif"
 
@@ -246,15 +246,16 @@ def sometimes_things_are_lists(original_batch, as_list=["continent", "geom", "co
     return result
 
 
-def read_partitions(folder: Path, test_partition: int):
+def read_partitions(folder: Path, fold: int):
     # Split index defines the partition index to use as test.
+    test_partition = fold
     val_partition = (test_partition + 1) % gff.constants.N_PARTITIONS
     val_partition_fname = f"floodmap_partition_{val_partition}.txt"
     test_partition_fname = f"floodmap_partition_{test_partition}.txt"
     train_fnames = []
     val_fnames = []
     test_fnames = []
-    for fpath in list((folder / "partitions/").glob("floodmap_partition_?.txt")):
+    for fpath in list((folder / "partitions").glob("floodmap_partition_?.txt")):
         fnames = pandas.read_csv(fpath, header=None)[0].values.tolist()
         if fpath.name == test_partition_fname:
             test_fnames.extend(fnames)
@@ -266,13 +267,15 @@ def read_partitions(folder: Path, test_partition: int):
     return train_fnames, val_fnames, test_fnames
 
 
-def get_valid_date_range(folder, all_fnames):
+def get_valid_date_range(folder, all_fnames, weather_window: int):
     era5_date_fmt = "%Y-%m"
+    weather_delta = datetime.timedelta(days=weather_window)
     # filenames like *-YYYY-mm.tif
     era5_filenames = list((folder / gff.constants.ERA5_FOLDER).glob("*"))
     era5_filenames.sort()
     era5_start_str = "-".join(era5_filenames[0].stem.split("-")[-2:])
     era5_start = datetime.datetime.strptime(era5_start_str, era5_date_fmt)
+    era5_start -= weather_delta
     era5_end_str = "-".join(era5_filenames[-1].stem.split("-")[-2:])
     era5_end = datetime.datetime.strptime(era5_end_str, era5_date_fmt)
 
@@ -280,12 +283,13 @@ def get_valid_date_range(folder, all_fnames):
     era5L_filenames.sort()
     era5L_start_str = "-".join(era5L_filenames[0].stem.split("-")[-2:])
     era5L_start = datetime.datetime.strptime(era5L_start_str, era5_date_fmt)
+    era5L_start -= weather_delta
     era5L_end_str = "-".join(era5L_filenames[-1].stem.split("-")[-2:])
     era5L_end = datetime.datetime.strptime(era5L_end_str, era5_date_fmt)
 
     fname_dates = []
     for fname in all_fnames:
-        # Ours is is FLOOD-BASIN-YYYY-MM-DD-YYYY-MM-DD-YYYY-MM-DD-meta.json
+        # Generated is is FLOOD-BASIN-YYYY-MM-DD-YYYY-MM-DD-YYYY-MM-DD-meta.json
         # kurosiwo is ACT_AOI_YYYY-MM-DD-meta.json
         date_str = "-".join(fname.split("_")[-1].split("-")[-4:-1])
         fname_dates.append(datetime.datetime.fromisoformat(date_str))
@@ -304,7 +308,7 @@ def create(C, generator):
         train_ds = DebugFloodForecastDataset(data_folder, C)
         test_ds = DebugFloodForecastDataset(data_folder, C)
     elif C["dataset"] == "forecast_dataset":
-        train_fnames, val_fnames, test_fnames = read_partitions(data_folder, C["test_partition"])
+        train_fnames, val_fnames, test_fnames = read_partitions(data_folder, C["fold"])
         all_fnames = sum([train_fnames, val_fnames, test_fnames], start=[])
         valid_date_range = get_valid_date_range(data_folder, all_fnames)
         train_ds = FloodForecastDataset(data_folder, C, valid_date_range, meta_fnames=train_fnames)

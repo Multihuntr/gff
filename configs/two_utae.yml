@@ -9,7 +9,7 @@ lead_time_dim: 16
 device: cuda:0
 
 dataset: forecast_dataset
-test_partition: 0
+fold: 0
 floodmap: final
 use_exported_s1: False
 weather_window: 20

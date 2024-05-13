@@ -86,7 +86,7 @@ def main(args):
         "INTERLEAVE": "BAND",
     }
 
-    floodmap_path = args.data_path / "floodmaps" / "vit"
+    floodmap_path = args.data_path / "floodmaps" / "final"
     meta_paths = list(floodmap_path.glob("*-meta.json"))
     for i, path in enumerate(tqdm.tqdm(meta_paths)):
         with open(path) as f:
@@ -110,10 +110,10 @@ def main(args):
         dxlo, dylo, dxhi, dyhi = gff.util.rounded_bounds(context_box_ds_px)
 
         k = Path(meta["floodmap"]).stem
-        dem_out_fpath = args.data_path / "context" / f"{k}-dem.tif"
-        hydroatlas_out_fpath = args.data_path / "context" / f"{k}-hydroatlas.tif"
-        era5_out_fpath = args.data_path / "context" / f"{k}-era5.tif"
-        era5L_out_fpath: Path = args.data_path / "context" / f"{k}-era5-land.tif"
+        dem_out_fpath = floodmap_path / f"{k}-dem-context.tif"
+        hydroatlas_out_fpath = floodmap_path / f"{k}-hydroatlas.tif"
+        era5_out_fpath = floodmap_path / f"{k}-era5.tif"
+        era5L_out_fpath: Path = floodmap_path / f"{k}-era5-land.tif"
         era5L_out_fpath.parent.mkdir(exist_ok=True)
 
         ds_spatial_profile = {
@@ -145,10 +145,7 @@ def main(args):
         this_hydroatlas_profile = {**hydroatlas_tif.profile, **ds_spatial_profile}
         with rasterio.open(hydroatlas_out_fpath, "w", **this_hydroatlas_profile) as out_tif:
             out_tif.descriptions = hydroatlas_tif.descriptions
-            window = gff.util.shapely_bounds_to_rasterio_window(
-                context_box.bounds, hydroatlas_tif.transform
-            )
-            data = hydroatlas_tif.read(window=window)
+            data = gff.util.get_tile(hydroatlas_tif, context_box.bounds)
             out_tif.write(data)
 
         # Output ERA5

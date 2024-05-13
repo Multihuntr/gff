@@ -47,11 +47,9 @@ def main(args):
     # Set seed for reproducibility
     gff.util.seed_packages(C["seed"])
 
-    # Set up experiment folder
-    model_folder = Path("runs") / f'{C["name"]}_{datetime.datetime.now().isoformat()}'
-    model_folder.mkdir(parents=True, exist_ok=True)
-    with open(model_folder / "config.yml", "w") as f:
-        yaml.safe_dump(C, f)
+    # Instantiate the model
+    model = gff.models.creation.create(C)
+    model.to(C["device"])
 
     # Prepare data loaders
     g = torch.Generator()
@@ -59,8 +57,10 @@ def main(args):
     train_dl, val_dl, test_dl = gff.dataloaders.create(C, g)
 
     # Train the model
-    model = gff.models.creation.create(C)
-    model.to(C["device"])
+    model_folder = Path("runs") / f'{C["name"]}_{datetime.datetime.now().isoformat()}'
+    model_folder.mkdir(parents=True, exist_ok=True)
+    with open(model_folder / "config.yml", "w") as f:
+        yaml.safe_dump(C, f)
     gff.training.training_loop(C, model_folder, model, (train_dl, val_dl))
 
     # Evaluate the model

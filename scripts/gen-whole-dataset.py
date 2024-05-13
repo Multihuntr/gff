@@ -28,7 +28,6 @@ def parse_args(argv):
     parser.add_argument("hydroatlas_path", type=Path)
     parser.add_argument("dfo_path", type=Path)
     parser.add_argument("tcs_path", type=Path)
-    # parser.add_argument("caravan_path", type=Path)
     parser.add_argument("ks_agg_labels_path", type=Path)
     parser.add_argument("data_path", type=Path)
     parser.add_argument("--hydroatlas_ver", type=int, default=10)
@@ -40,7 +39,9 @@ def parse_args(argv):
         default=None,
         help="If provided, will only try to generate floodmaps for this continent",
     )
-    parser.add_argument("--flood_model_names", "-m", nargs="+", type=str, default=["vit"])
+    parser.add_argument(
+        "--flood_model_names", "-m", nargs="+", type=str, default=["vit", "vit+snunet", "snunet"]
+    )
 
     return parser.parse_args(argv)
 

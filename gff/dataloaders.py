@@ -5,6 +5,7 @@ from pathlib import Path
 import geopandas
 import numpy as np
 import pandas
+import rasterio
 import shapely
 import torch
 import torch.nn
@@ -93,7 +94,7 @@ class FloodForecastDataset(torch.utils.data.Dataset):
     ):
         self.folder = folder
         self.C = C
-        self.floodmap_path = self.folder / "floodmaps" / self.C["floodmap"]
+        self.floodmap_path = self.folder / "rois"
         self.valid_date_range = valid_date_range
         self.meta_fnames = sorted(meta_fnames)
         self.metas = self.load_tile_metas()
@@ -123,8 +124,10 @@ class FloodForecastDataset(torch.utils.data.Dataset):
             visit_tiles = geopandas.read_file(p, use_arrow=True, engine="pyogrio")
 
             # Extract geometries
+            # Local could be any CRS, but context is always EPSG:4326 (to match ERA5)
             geoms = list(visit_tiles.geometry)
-            context_geoms = [self.mk_context_geom(geom) for geom in geoms]
+            geoms_4326 = list(visit_tiles.to_crs("EPSG:4326").geometry)
+            context_geoms = [self.mk_context_geom(geom) for geom in geoms_4326]
 
             # Create a simple list of tuples; one per example tile
             meta_parallel = [meta] * len(geoms)
@@ -132,21 +135,6 @@ class FloodForecastDataset(torch.utils.data.Dataset):
             pairs = list(zip(meta_parallel, crs_parallel, geoms, context_geoms))
             tiles.extend(pairs)
         return tiles
-
-    def get_s1_path(self, meta):
-        if self.C["use_exported_s1"]:
-            s1_folder = "s1-export"
-        else:
-            s1_folder = "s1"
-
-        date_str = datetime.datetime.fromisoformat(meta["pre1_date"]).strftime("%Y-%m-%d")
-        if meta["type"] == "kurosiwo":
-            fname = f"{meta['info']['actid']}-{meta['info']['aoiid']}-{date_str}.tif"
-            s1_fname = Path("kurosiwo") / fname
-        elif meta["type"] == "generated":
-            s1_fname = f"{meta['FLOOD']}-{meta['HYBAS_ID']}-{date_str}.tif"
-
-        return self.folder / s1_folder / s1_fname
 
     def get_s1_lead_days(self, meta):
         pre1_date = datetime.datetime.fromisoformat(meta["pre1_date"])
@@ -159,11 +147,11 @@ class FloodForecastDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         meta, crs, geom, context_geom = self.tiles[idx]
         floodmap_path = self.floodmap_path / meta["floodmap"]
-        s1_path = self.get_s1_path(meta)
         hybas_key = "HYBAS_ID" if "HYBAS_ID" in meta else "HYBAS_ID_4"
         continent = int(str(meta[hybas_key])[0])
+        context_res = (gff.constants.CONTEXT_RESOLUTION,) * 2
         result = {
-            "floodmap": gff.util.get_tile(floodmap_path, geom.bounds).astype(np.int64),
+            "floodmap": gff.util.get_tile(floodmap_path, geom.bounds, align=True).astype(np.int64),
             "continent": continent,
             "geom": geom,
             "context_geom": context_geom,
@@ -172,60 +160,71 @@ class FloodForecastDataset(torch.utils.data.Dataset):
 
         # Add in various data sources
         # Weather data
-        # last_name = gff.constants.KUROSIWO_S1_NAMES[-2]
         future_name = gff.constants.KUROSIWO_S1_NAMES[-1]
-        # weather_start = datetime.datetime.fromisoformat(meta[f"{last_name}_date"])
         weather_end = datetime.datetime.fromisoformat(meta[f"{future_name}_date"])
         weather_start = weather_end - datetime.timedelta(days=(self.C["weather_window"] - 1))
         if "era5_land" in self.C["data_sources"]:
-            result["era5_land"] = gff.data_sources.load_era5(
-                self.folder / gff.constants.ERA5L_FOLDER,
+            data = gff.data_sources.load_exported_era5(
+                floodmap_path.with_name(floodmap_path.stem + "-era5-land.tif"),
                 context_geom,
-                gff.constants.CONTEXT_RESOLUTION,
                 weather_start,
                 weather_end,
-                era5_land=True,
+                keys=self.C["era5_land_keys"],
             )
-            result["era5_land"] = np.array(result["era5_land"], dtype=np.float32)
+            result["era5_land"] = np.array(data, dtype=np.float32)
         if "era5" in self.C["data_sources"]:
-            result["era5"] = gff.data_sources.load_era5(
-                self.folder / gff.constants.ERA5_FOLDER,
+            data = gff.data_sources.load_exported_era5(
+                floodmap_path.with_name(floodmap_path.stem + "-era5.tif"),
                 context_geom,
-                gff.constants.CONTEXT_RESOLUTION,
                 weather_start,
                 weather_end,
-                era5_land=False,
+                keys=self.C["era5_keys"],
             )
-            result["era5"] = np.array(result["era5"], dtype=np.float32)
+            result["era5"] = np.array(data, dtype=np.float32)
 
         # (Relatively) static soil attributes
         if "hydroatlas_basin" in self.C["data_sources"]:
-            fpath = self.folder / gff.constants.HYDROATLAS_RASTER_FNAME
-            result["hydroatlas_basin"] = gff.data_sources.load_pregenerated_raster(
-                fpath,
-                context_geom,
-                gff.constants.CONTEXT_RESOLUTION,
-                keys=self.C["hydroatlas_keys"],
-            )
-            result["hydroatlas_basin"] = np.array(result["hydroatlas_basin"], dtype=np.float32)
+            fpath = floodmap_path.with_name(floodmap_path.stem + "-hydroatlas.tif")
+            with rasterio.open(fpath) as tif:
+                window = gff.util.shapely_bounds_to_rasterio_window(
+                    context_geom.bounds, tif.transform, align=False
+                )
+                band_idxs = [tif.descriptions.index(k) for k in self.C["hydroatlas_keys"]]
+                data = tif.read(
+                    band_idxs,
+                    window=window,
+                    out_shape=context_res,
+                    resampling=rasterio.enums.Resampling.bilinear,
+                )
+            result["hydroatlas_basin"] = np.array(data, dtype=np.float32)
 
         # DEM at coarse and fine scales
         if "dem_context" in self.C["data_sources"]:
-            fpath = self.folder / gff.constants.COARSE_DEM_FNAME
-            result["dem_context"] = gff.data_sources.load_pregenerated_raster(
-                fpath, context_geom, gff.constants.CONTEXT_RESOLUTION
-            )
-            result["dem_context"] = np.array(result["dem_context"], dtype=np.float32)
+            fpath = floodmap_path.with_name(floodmap_path.stem + "-dem-context.tif")
+            with rasterio.open(fpath) as tif:
+                window = gff.util.shapely_bounds_to_rasterio_window(
+                    context_geom.bounds, tif.transform, align=False
+                )
+                data = tif.read(
+                    window=window,
+                    out_shape=context_res,
+                    resampling=rasterio.enums.Resampling.bilinear,
+                )
+                nan_mask = data == tif.nodata
+            result["dem_context"] = np.array(data, dtype=np.float32)
+            result["dem_context"][nan_mask] = np.nan
         if "dem_local" in self.C["data_sources"]:
-            dem = gff.data_sources.get_dem(geom, crs, self.folder)
-            result["dem_local"] = gff.util.resample_xr(
-                dem, geom.bounds, (gff.constants.LOCAL_RESOLUTION,) * 2, method="linear"
-            ).band_data.values
-            result["dem_local"] = np.array(result["dem_local"], dtype=np.float32)
+            fpath = floodmap_path.with_name(floodmap_path.stem + "-dem-local.tif")
+            data = gff.util.get_tile(fpath, geom.bounds, align=True)
+            result["dem_local"] = np.array(data, dtype=np.float32)
 
         # Sentinel 1 (assumed to be a proxy for soil moisture)
         if "s1" in self.C["data_sources"]:
-            result["s1"] = gff.util.get_tile(s1_path, geom.bounds)
+            s1_stem = gff.util.get_s1_stem_from_meta(meta)
+            s1_path = self.floodmap_path / f"{s1_stem}-s1.tif"
+            result["s1"] = gff.util.get_tile(s1_path, geom.bounds, align=True)
+            if np.isnan(result["s1"]).sum() > 0:
+                raise Exception("NO! It can't be!")
 
         return result
 
@@ -247,7 +246,6 @@ def sometimes_things_are_lists(original_batch, as_list=["continent", "geom", "co
 
 
 def read_partitions(folder: Path, fold: int):
-    # Split index defines the partition index to use as test.
     test_partition = fold
     val_partition = (test_partition + 1) % gff.constants.N_PARTITIONS
     val_partition_fname = f"floodmap_partition_{val_partition}.txt"
@@ -289,9 +287,8 @@ def get_valid_date_range(folder, all_fnames, weather_window: int):
 
     fname_dates = []
     for fname in all_fnames:
-        # Generated is is FLOOD-BASIN-YYYY-MM-DD-YYYY-MM-DD-YYYY-MM-DD-meta.json
-        # kurosiwo is ACT_AOI_YYYY-MM-DD-meta.json
-        date_str = "-".join(fname.split("_")[-1].split("-")[-4:-1])
+        # fnames like '*-YYYY-MM-DD-meta.json'
+        date_str = "-".join(fname.split("-")[-4:-1])
         fname_dates.append(datetime.datetime.fromisoformat(date_str))
     fname_dates.sort()
     if len(all_fnames) > 0:
@@ -311,11 +308,12 @@ def create(C, generator):
     data_folder = Path(C["data_folder"]).expanduser()
     if C["dataset"] == "debug_dataset":
         train_ds = DebugFloodForecastDataset(data_folder, C)
+        val_ds = DebugFloodForecastDataset(data_folder, C)
         test_ds = DebugFloodForecastDataset(data_folder, C)
     elif C["dataset"] == "forecast_dataset":
         train_fnames, val_fnames, test_fnames = read_partitions(data_folder, C["fold"])
         all_fnames = sum([train_fnames, val_fnames, test_fnames], start=[])
-        valid_date_range = get_valid_date_range(data_folder, all_fnames)
+        valid_date_range = get_valid_date_range(data_folder, all_fnames, C["weather_window"])
         train_ds = FloodForecastDataset(data_folder, C, valid_date_range, meta_fnames=train_fnames)
         val_ds = FloodForecastDataset(data_folder, C, valid_date_range, meta_fnames=val_fnames)
         test_ds = FloodForecastDataset(data_folder, C, valid_date_range, meta_fnames=test_fnames)

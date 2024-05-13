@@ -20,23 +20,6 @@ Download:
 1. HydroATLAS (HydroBASIN and HydroRIVER)
 2. Caravan + GRDC extension
 
-# Authentication
-
-To download S1 images programmatically, we use `asf_search`, which requires login details.
-
-To set this up, there are some manual steps.
-1. Ensure you have an [EarthData account](https://urs.earthdata.nasa.gov/).
-2. Agree to the ASF EULA. To do this:
-    1. Click the above link.
-    2. Sign in if you have not already.
-    3. Go to "EULAs"->"Accept New EULAs"
-    4. Accept the "Alaska Satellite Facility Data Access" EULA
-3. Create a file `.asf_auth` in this directory. It should be a JSON with your plaintext credentials. Like this:
-
-```json
-{"user": "<username>", "pass": "<password>"}
-```
-
 # Data sources
 
 This project builds on many amazing existing datasets and models to achieve its various purposes.

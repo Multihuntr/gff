@@ -1,13 +1,9 @@
 seed: 6426452
 data_folder: ~/NFS_era5/gff
-# ext_data_folders:
-#   era5: ~/NFS_era5/ERA5-daily
-#   era5_land: ~/NFS_era5/ERA5-Land-daily
 
 name: debug_everything
 
 model: debug_model
-hydroatlas_dim: 16
 device: cuda:0
 
 dataset: debug_dataset

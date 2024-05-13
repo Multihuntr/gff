@@ -97,8 +97,9 @@ def main(args):
 
         # Organise filenames
         (d, actid, aoiid) = k
-        id_str = f"{actid}_{aoiid}"
-        fname = f"{id_str}_{d.strftime(d_fmt)}.tif"
+        id_str = f"{actid}-{aoiid}"
+        post_d = datetime.datetime.fromisoformat(infos[0]["sources"]["MS1"]["source_date"])
+        fname = f"{id_str}-{post_d.strftime(d_fmt)}.tif"
         fname = Path(fname)
         geoms_fname = fname.with_name(fname.stem + "-geoms.gpkg")
         meta_fname = fname.with_name(fname.stem + "-meta.json")
@@ -118,7 +119,7 @@ def main(args):
         with rasterio.open(lbl_folder / fname, "w", **profile) as out_tif:
             out_tif.update_tags(date=d.isoformat())
             to_iter = list(zip(group, geom_mask))
-            for (path, info, geom), mask in tqdm.tqdm(to_iter, desc="S1", leave=False):
+            for (path, info, geom), mask in tqdm.tqdm(to_iter, desc="Labels", leave=False):
                 if mask:
                     continue
                 # Add target tile
@@ -155,7 +156,7 @@ def main(args):
                             chosen_result = result
                             break
                     if chosen_result is None:
-                        raise NoS1Exception(f"No S1 image was found for site: {actid}_{aoiid}")
+                        raise NoS1Exception(f"No S1 image was found for site: {actid}-{aoiid}")
                     s1_fpath = gff.generate.floodmaps.ensure_s1(
                         args.data_path, id_str, [result], delete_intermediate=True
                     )
@@ -163,50 +164,27 @@ def main(args):
                         chosen_result["properties"]["startTime"]
                     )
 
-                s1_d_str = s1_d.strftime(d_fmt)
-                s1_fname = f"{actid}_{aoiid}_{s1_d_str}.tif"
-                s1_in_tif = rasterio.open(s1_fpath)
-                with rasterio.open(s1_folder / s1_fname, "w", **s1_profile) as s1_out_tif:
-                    s1_out_tif.update_tags(date=s1_d.isoformat())
-                    to_iter = list(zip(group, geom_mask))
-                    for (path, info, geom), mask in tqdm.tqdm(to_iter, desc="S1", leave=False):
-                        if mask:
-                            continue
-                        # Add S1 tile
-                        geom_in_inp_crs = gff.util.convert_crs(
-                            geom, s1_profile["crs"], s1_in_tif.crs
-                        )
-                        s1_in_window = gff.util.shapely_bounds_to_rasterio_window(
-                            geom_in_inp_crs.bounds, s1_in_tif.transform, align=False
-                        )
-                        s1_out_window = gff.util.shapely_bounds_to_rasterio_window(
-                            geom.bounds, s1_out_tif.transform
-                        )
-                        s1_data = s1_in_tif.read(window=s1_in_window)
-                        s1_out_tif.write(s1_data, window=s1_out_window)
-                s1_in_tif.close()
                 pre1_date = s1_d.isoformat()
             except NoS1Exception as e:
                 print("Falling back to using kurosiwos own S1 images")
-                for k in ["SL2", "SL1", "MS1"]:
-                    d_str = infos[0]["sources"][k]["source_date"]
-                    fname = f"{actid}_{aoiid}_{d_str}.tif"
-                    with rasterio.open(s1_folder / fname, "w", **s1_profile) as out_tif:
-                        out_tif.descriptions = ("VV", "VH")
-                        for band_idx, polarisation in zip(range(1, 3), ["VV", "VH"]):
-                            ds_name = f"{k}_I{polarisation}"
-                            iter = tqdm.tqdm(list(zip(group, geom_mask)), desc="S1", leave=False)
-                            for (path, info, geom), mask in iter:
-                                if mask:
-                                    continue
-                                s1_file = [name for name in info["datasets"] if ds_name in name][0]
-                                with rasterio.open(path / f"{s1_file}.tif") as in_tif:
-                                    s1_data = in_tif.read()
-                                window = gff.util.shapely_bounds_to_rasterio_window(
-                                    geom.bounds, out_tif.transform
-                                )
-                                out_tif.write(s1_data[0], band_idx, window=window)
-                pre1_date = standardise_iso_fmt(infos[0]["sources"]["SL1"]["source_date"])
+                d_str = infos[0]["sources"]["SL1"]["source_date"]
+                s1_fname = f"{actid}-{aoiid}-{d_str}.tif"
+                with rasterio.open(s1_folder / s1_fname, "w", **s1_profile) as out_tif:
+                    out_tif.descriptions = ("VV", "VH")
+                    for band_idx, polarisation in zip(range(1, 3), ["VV", "VH"]):
+                        ds_name = f"SL1_I{polarisation}"
+                        iter = tqdm.tqdm(list(zip(group, geom_mask)), desc="S1", leave=False)
+                        for (path, info, geom), mask in iter:
+                            if mask:
+                                continue
+                            s1_file = [name for name in info["datasets"] if ds_name in name][0]
+                            with rasterio.open(path / f"{s1_file}.tif") as in_tif:
+                                s1_data = in_tif.read()
+                            window = gff.util.shapely_bounds_to_rasterio_window(
+                                geom.bounds, out_tif.transform
+                            )
+                            out_tif.write(s1_data[0], band_idx, window=window)
+                pre1_date = standardise_iso_fmt(d_str)
         else:
             pre1_date = standardise_iso_fmt(infos[0]["sources"]["SL1"]["source_date"])
 
@@ -214,6 +192,7 @@ def main(args):
 
         meta = {
             "type": "kurosiwo",
+            "key": f'{infos[0]["actid"]}-{infos[0]["aoiid"]}',
             "HYBAS_ID_4": hybas_id.item(),
             "actid": infos[0]["actid"],
             "aoiid": infos[0]["aoiid"],

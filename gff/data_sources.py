@@ -287,6 +287,17 @@ def load_dfo(path: Path, for_s1: bool = False):
 
 @functools.lru_cache(maxsize=None)
 def _era5_band_index(p: Path):
+    """
+    Internally, the tif file has a flat list of bands which represent
+    the different keys on different days.
+    This function returns all of the key idxs in a dict structure so
+    that it's easier to pull out just the parts you need.
+
+    Access like band_idxs['YYYY-MM-DD'][key]
+
+    In retrospect, perhaps a netcdf file would have been better,
+    since it can have a third indexing dimension of time. TODO.
+    """
     band_index = {}
     with rasterio.open(p) as tif:
         for i, name in enumerate(tif.descriptions):
@@ -308,6 +319,7 @@ def load_era5(
     keys: list[str] = None,
     era5_land: bool = True,
 ):
+    """For reading from raw data exported from GEE"""
     if isinstance(res, int):
         res = (res, res)
     if keys is None:
@@ -359,6 +371,32 @@ def load_era5(
             results.extend(data)
 
     return out_keys, results
+
+
+def load_exported_era5(
+    fpath: Path,
+    geom: shapely.Geometry,
+    start: datetime.datetime,
+    end: datetime.datetime,
+    keys: list[str],
+):
+    """For reading an exported raster already at the right resolution"""
+    # Calculate the indices to read
+    band_index = _era5_band_index(fpath)
+    day_strs = []
+    current = start
+    while current <= end:
+        day_strs.append(current.strftime("%Y-%m-%d"))
+        current += datetime.timedelta(days=1)
+
+    band_idxs = [band_index[day_str][k] for day_str in day_strs for k in keys]
+
+    with rasterio.open(fpath) as tif:
+        window = util.shapely_bounds_to_rasterio_window(geom.bounds, tif.transform, align=False)
+        data = tif.read(band_idxs, window=window, resampling=rasterio.enums.Resampling.bilinear)
+        data = einops.rearrange(data, "(I B) H W -> I B H W", I=len(day_strs), B=len(keys))
+
+    return data
 
 
 def load_pregenerated_raster(

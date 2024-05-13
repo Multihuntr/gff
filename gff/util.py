@@ -171,6 +171,7 @@ def get_tile(
     bounds: tuple[float, float, float, float] = None,
     bounds_px: tuple[int, int, int, int] = None,
     bounds_in_px: bool = False,
+    align: bool = False
 ):
     if isinstance(p, Path):
         tif = rasterio.open(p)
@@ -178,9 +179,9 @@ def get_tile(
         tif = p
 
     if bounds is not None and not bounds_in_px:
-        window = shapely_bounds_to_rasterio_window(bounds, tif.transform, align=False)
+        window = shapely_bounds_to_rasterio_window(bounds, tif.transform, align=align)
     elif (bounds is not None and bounds_in_px) or bounds_px is not None:
-        window = shapely_bounds_to_rasterio_window(bounds_px, align=False)
+        window = shapely_bounds_to_rasterio_window(bounds_px, align=align)
     else:
         raise Exception("Either bounds or bounds_px must have a value")
 
@@ -313,8 +314,9 @@ def seed_packages(seed):
 # The ol' misc. functions
 
 
-def parse_date(date_str):
-    return datetime.datetime.strptime(date_str, "%Y-%m-%d")
+def get_s1_stem_from_meta(meta: dict):
+    date_str = datetime.datetime.fromisoformat(meta["pre1_date"]).strftime("%Y-%m-%d")
+    return f'{meta['key']}-{date_str}'
 
 
 # UNTESTED. Don't use.

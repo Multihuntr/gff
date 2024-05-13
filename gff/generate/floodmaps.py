@@ -206,6 +206,7 @@ def create_flood_maps(
 
         meta = {
             "type": "generated",
+            "key": cross_term,
             "FLOOD": f"{basin_row.ID}",
             "HYBAS_ID": f"{basin_row.HYBAS_ID}",
             "pre2_date": search_results[search_idx[0]][0]["properties"]["startTime"],
@@ -257,7 +258,7 @@ def progressively_grow_floodmaps(
     rivers_df: geopandas.GeoDataFrame,
     data_folder: Path,
     floodmap_path: Path,
-    flood_model: Union[torch.nn.Module, callable],
+    flood_model: torch.nn.Module | callable,
     tile_size: int = 224,
     export_s1: bool = False,
     print_freq: int = 0,
@@ -266,7 +267,7 @@ def progressively_grow_floodmaps(
     prescribed_tiles: np.ndarray[shapely.Geometry] = None,
 ):
     """
-    First run flood_model along riverway from geom, then expand the search as flooded areas are found.
+    First runs flood_model along riverways, then expands the search as flooded areas are found.
     Stores all visited tiles to floodmap_path.
 
     Note: all tifs in inp_img_paths must match resolution and CRS.
@@ -411,7 +412,7 @@ def progressively_grow_floodmaps(
         tif.close()
 
     print(" Tile search complete. Postprocessing outputs.")
-    postprocess(data_folder, raw_floodmap_path, floodmap_path, fill_tiles, nodata=floodmap_nodata)
+    postprocess(raw_floodmap_path, floodmap_path, nodata=floodmap_nodata)
     return fill_tiles, flood_tiles, s1_fpaths
 
 
@@ -675,52 +676,15 @@ def average_logits_towards_edges(logits, adjacent):
     out[:, *slices["do"]] += f(adjacent["do"], slices["do"], slices["up"], weights[2, 1])
     out[:, *slices["br"]] += f(adjacent["br"], slices["br"], slices["tl"], weights[2, 2])
 
-    if False:
-        out_tl = np.zeros_like(logits)
-        out_tl[:, *slices["tl"]] += f(adjacent["tl"], slices["tl"], slices["br"], weights[0, 0])
-        debug.save_as_rgb(out_tl, "debug_tl_weighted.png")
-        out_up = np.zeros_like(logits)
-        out_up[:, *slices["up"]] += f(adjacent["up"], slices["up"], slices["do"], weights[0, 1])
-        debug.save_as_rgb(out_up, "debug_up_weighted.png")
-        out_tr = np.zeros_like(logits)
-        out_tr[:, *slices["tr"]] += f(adjacent["tr"], slices["tr"], slices["bl"], weights[0, 2])
-        debug.save_as_rgb(out_tr, "debug_tr_weighted.png")
-        out_le = np.zeros_like(logits)
-        out_le[:, *slices["le"]] += f(adjacent["le"], slices["le"], slices["ri"], weights[1, 0])
-        debug.save_as_rgb(out_le, "debug_le_weighted.png")
-        out_ri = np.zeros_like(logits)
-        out_ri[:, *slices["ri"]] += f(adjacent["ri"], slices["ri"], slices["le"], weights[1, 2])
-        debug.save_as_rgb(out_ri, "debug_ri_weighted.png")
-        out_bl = np.zeros_like(logits)
-        out_bl[:, *slices["bl"]] += f(adjacent["bl"], slices["bl"], slices["tr"], weights[2, 0])
-        debug.save_as_rgb(out_bl, "debug_bl_weighted.png")
-        out_do = np.zeros_like(logits)
-        out_do[:, *slices["do"]] += f(adjacent["do"], slices["do"], slices["up"], weights[2, 1])
-        debug.save_as_rgb(out_do, "debug_do_weighted.png")
-        out_br = np.zeros_like(logits)
-        out_br[:, *slices["br"]] += f(adjacent["br"], slices["br"], slices["tl"], weights[2, 2])
-        debug.save_as_rgb(out_br, "debug_br_weighted.png")
-
-        debug.save_as_rgb(logits * weights[1, 1], "debug_centre.png")
-        debug.save_as_rgb(logits, "debug_orig.png")
-        debug.save_as_rgb(out, "debug_out.png")
-
-        debug.save_as_rgb(adjacent["tl"], "debug_tl.png")
-        debug.save_as_rgb(adjacent["up"], "debug_up.png")
-        debug.save_as_rgb(adjacent["tr"], "debug_tr.png")
-        debug.save_as_rgb(adjacent["le"], "debug_le.png")
-        debug.save_as_rgb(adjacent["ri"], "debug_ri.png")
-        debug.save_as_rgb(adjacent["bl"], "debug_bl.png")
-        debug.save_as_rgb(adjacent["do"], "debug_do.png")
-        debug.save_as_rgb(adjacent["br"], "debug_br.png")
-
     return out
 
 
 def s1_preprocess_edge_heuristic(tensors, threshold=0.05):
     """Uses a heuristic to check if the tensor is not at the edge (i.e. False if at the edge)"""
+    no_nan = np.all([np.isnan(t).sum() == 0 for t in tensors])
     # The tensors are at the edge if they have a significant proportion of 0s
-    return np.all([(t < 1e-5).sum() < (t.size * threshold) for t in tensors])
+    not_too_many_zeros = np.all([(t < 1e-5).sum() < (t.size * threshold) for t in tensors])
+    return no_nan and not_too_many_zeros
 
 
 def check_flooded(tile, threshold=0.05):
@@ -863,7 +827,7 @@ def model_runner(name: str, data_folder: Path):
     return run_flood_model
 
 
-def postprocess(data_folder, in_fpath, out_fpath, tiles, nodata, **kwargs):
+def postprocess(in_fpath, out_fpath, nodata, **kwargs):
     """
     Postprocessing:
     - Clean up the edges

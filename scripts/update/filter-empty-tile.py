@@ -33,6 +33,9 @@ def main(args):
                 keep = not (data.min().item() == 255 or data.max().item() == 255)
                 geom_mask.append(keep)
         geoms_masked = geoms[geom_mask]
+        if len(geoms) == 0:
+            print(meta_path, "had 0 tiles. Skipping...")
+            continue
         geoms_masked.to_file(v_p)
 
 

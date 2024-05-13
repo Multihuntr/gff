@@ -20,13 +20,15 @@ def train_epoch(
 ):
     losses = []
     device = next(model.parameters()).device
-    f1 = torchmetrics.classification.MulticlassF1Score(3, average="macro")
+    f1 = torchmetrics.classification.MulticlassF1Score(3, average="macro", ignore_index=-100)
     f1.to(device)
+    criterion = criterion.to(device)
     model.train()
-    for i, example in enumerate(tqdm.tqdm(dataloader, desc="Training", leave=False)):
-        example = gff.util.recursive_todevice(example, device)
+    for i, example_cpu in enumerate(tqdm.tqdm(dataloader, desc="Training", leave=False)):
+        example = gff.util.recursive_todevice(example_cpu, device)
         targ = example.pop("floodmap")
         pred = model(example)
+        targ[targ > 2] = -100  # To make criterion ignore weird numbers from Kuro Siwo
 
         optim.zero_grad()
         loss = criterion(pred, targ[:, 0])
@@ -39,7 +41,7 @@ def train_epoch(
         if ((i + 1) % scalar_freq) == 0:
             write_scalars(loss_float, this_f1.cpu().item())
         if ((i + 1) % img_freq) == 0:
-            write_imgs(example, pred, targ)
+            write_imgs(example_cpu, pred.detach().cpu(), targ.detach().cpu())
     return sum(losses) / len(losses), f1.compute().cpu().item()
 
 
@@ -48,12 +50,13 @@ def test_epoch(model, dataloader, criterion, limit: int = None):
     with torch.no_grad():
         losses = []
         device = next(model.parameters()).device
-        f1 = torchmetrics.classification.MulticlassF1Score(3, average="macro")
+        f1 = torchmetrics.classification.MulticlassF1Score(3, average="macro", ignore_index=-100)
         f1.to(device)
         for i, example in enumerate(tqdm.tqdm(dataloader, desc="Testing", leave=False)):
             example = gff.util.recursive_todevice(example, device)
             targ = example.pop("floodmap")
             pred = model(example)
+            targ[targ > 2] = -100
 
             loss = criterion(pred, targ[:, 0])
 
@@ -86,28 +89,28 @@ def cls_to_rgb(arr: np.ndarray):
 def auto_incr_img_writer_closure(writer):
 
     def add_next(ex: dict, pred: torch.tensor, targ: torch.tensor):
-        pred_cls = pred[0].argmax(dim=0).cpu().numpy()
+        pred_cls = pred[0].argmax(dim=0).numpy()
         pred_rgb = cls_to_rgb(pred_cls)
-        targ_cls = targ[0, 0].cpu().numpy()
+        targ_cls = targ[0, 0].numpy()
         targ_rgb = cls_to_rgb(targ_cls)
         context_rasters = []
         for k in ["era5", "era5_land"]:
             if k in ex:
-                r = ex[k][0][:, :3].cpu().numpy()
+                r = ex[k][0][:, :3].numpy()
                 context_rasters.extend(r)
         if "hydroatlas" in ex:
-            r = ex["hydroatlas"][0][:3].cpu().numpy()
+            r = ex["hydroatlas"][0][:3].numpy()
             context_rasters.append(r)
         if "dem_context" in ex:
-            r = ex["dem_context"][0].repeat((3, 1, 1)).cpu().numpy()
+            r = ex["dem_context"][0].repeat((3, 1, 1)).numpy()
             context_rasters.append(r)
 
         local_rasters = []
         if "dem_local" in ex:
-            r = ex["dem_local"][0].repeat((3, 1, 1)).cpu().numpy()
+            r = ex["dem_local"][0].repeat((3, 1, 1)).numpy()
             local_rasters.append(r)
         if "s1" in ex:
-            r = ex["s1"][0].cpu().numpy()
+            r = ex["s1"][0].numpy()
             r = np.stack([*r, np.zeros_like(r[0])], axis=0)
             local_rasters.append(r)
 
@@ -131,7 +134,7 @@ def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=Non
         optim.load_state_dict(checkpoint["optim"])
         scheduler.load_state_dict(checkpoint["scheduler"])
         start_epoch = checkpoint["epoch"]
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(ignore_index=-100)
 
     writer = torch.utils.tensorboard.SummaryWriter(model_folder)
     write_scalars = auto_incr_scalar_writer_closure(writer)

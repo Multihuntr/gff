@@ -10,8 +10,6 @@ device: cuda:0
 
 dataset: forecast_dataset
 fold: 0
-floodmap: final
-use_exported_s1: False
 weather_window: 20
 data_sources:
   - era5
@@ -21,13 +19,13 @@ data_sources:
   - dem_local
   - s1
 
-batch_size: 64
+batch_size: 2
 lr: 0.001
 lr_decay: 0.97
 epochs: 20
 num_workers: 12
-scalar_freq: 64
-img_freq: 256
+scalar_freq: 16
+img_freq: 16
 
 hydroatlas_keys:
   - aet_mm_uyr

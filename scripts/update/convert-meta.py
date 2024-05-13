@@ -16,7 +16,7 @@ def parse_args(argv):
     return parser.parse_args(argv)
 
 
-def main(args):
+def move_json_coords_to_gpkg(args):
     kwargs = {"columns": ["geometry"], "geometry": "geometry", "crs": "EPSG:4326"}
     count = 0
     for path in args.data_path.glob("**/*-meta.json"):
@@ -48,6 +48,23 @@ def main(args):
             with open(path, "w") as f:
                 json.dump(meta, f)
     print(f"Checked {count} files")
+
+
+def main(args):
+    for path in args.data_path.glob("*-meta.json"):
+        with open(path) as f:
+            meta = json.load(f)
+
+        if meta["type"] == "generated":
+            meta["key"] = f'{meta["FLOOD"]}-{meta["HYBAS_ID"]}'
+        elif meta["type"] == "kurosiwo":
+            meta["key"] = f'{meta["actid"]}-{meta["aoiid"]}'
+
+        if "s1" in meta:
+            del meta["s1"]
+
+        with open(path, "w") as f:
+            json.dump(meta, f)
 
 
 if __name__ == "__main__":

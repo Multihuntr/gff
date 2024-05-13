@@ -158,7 +158,7 @@ class TwoUTAE(nn.Module):
         s1_inp = self.normalise(ex, "s1")
 
         # These inputs might have nan
-        era5_inp = nans_to_zero(era5_inp)
+        era5l_inp = nans_to_zero(era5l_inp)
         hydroatlas_inp = nans_to_zero(hydroatlas_inp)
         dem_context_inp = nans_to_zero(dem_context_inp)
         dem_local_inp = nans_to_zero(dem_local_inp)
@@ -179,11 +179,12 @@ class TwoUTAE(nn.Module):
         else:
             context_inp = torch.cat([era5l_inp, era5_inp], dim=2)
         context_embedded = self.context_embed(context_inp, batch_positions)
+        context_embedded = context_embedded[:, 0]
 
         # Select the central 2x2 pixels and average
         ylo, yhi = cH // 2 - 1, cH // 2 + 3
         xlo, xhi = cW // 2 - 1, cW // 2 + 3
-        context_out = context_embedded[:, 0, :, ylo:yhi, xlo:xhi].mean(axis=(2, 3), keepdims=True)
+        context_out = context_embedded[:, :, ylo:yhi, xlo:xhi].mean(axis=(2, 3), keepdims=True)
         context_out_repeat = context_out.repeat((1, 1, fH, fW))
 
         # Get Lead time embedding indexes

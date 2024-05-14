@@ -34,13 +34,13 @@ This is how we generated the floodmaps:
 8. Rasterize HydroATLAS: Run `scripts/rasterize-hydroatlas.py`
     1. *Note*: This requires 300GB of RAM. Here's a link to download a worldwide rasterised HydroATLAS: TODO
 8. Finishing / exporting into DL-ready form:
-    1. Copy the floodmaps of your choice (vit, vit+snunet, snunet) into a new directory at `gff-raw-data/floodmaps/final`. This is hard-coded in a number of places.
+    1. Copy the floodmaps of your choice (vit, vit+snunet, snunet) into a new directory at `gff-raw-data/rois`. This is hard-coded in a number of places.
     2. Copy the exported kurosiwo floodmaps into the same directory.
     3. Run scripts/partition-the-world.py
     4. Run scripts/export-context.py
     5. Run scripts/export-local.py
     6. Run scripts/calc-norm-param.py *warning: has hard-coded outputs; maybe modify as needed*
-    6. The `gff-raw-data/floodmaps/final` folder now contains your dataset, ready for deep learning. The `gff-raw-data/partitions` contains the partition information.
+    6. The `gff-raw-data/rois` folder now contains your dataset, ready for deep learning. The `gff-raw-data/partitions` contains the partition information.
 
 
 # Changing sampling method

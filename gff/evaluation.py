@@ -15,7 +15,7 @@ def get_tilewise_count(tile: torch.tensor):
     return count
 
 
-def evaluate_model(model: nn.Module, dataloader: torch.utils.data.DataLoader):
+def evaluate_model_overall(model: nn.Module, dataloader: torch.utils.data.DataLoader):
     device = next(model.parameters()).device
     overall_f1 = torchmetrics.classification.MulticlassF1Score(3, average="macro").to(device)
     continent_f1 = {

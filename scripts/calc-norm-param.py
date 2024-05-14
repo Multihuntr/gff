@@ -118,7 +118,7 @@ def get_stats_s1_dem(folder: Path):
         for i, tile_row in tqdm.tqdm(
             visit_tiles.iterrows(), desc="Tiles", total=len(visit_tiles), leave=False
         ):
-            s1_data = gff.util.get_tile(s1_tif, tile_row.geometry.bounds)
+            s1_data = gff.util.get_tile(s1_tif, tile_row.geometry.bounds, align=True)
             s1_summed = s1_data.sum(axis=(1, 2))
             s1_sum_sqred = (s1_data**2).sum(axis=(1, 2))
             H, W = s1_data[0].shape
@@ -127,7 +127,7 @@ def get_stats_s1_dem(folder: Path):
             if np.isnan(s1_summed).sum() > 0:
                 raise Exception("S1 has nan. That shouldn't happen")
 
-            dem = gff.util.get_tile(dem_tif, tile_row.geometry.bounds)
+            dem = gff.util.get_tile(dem_tif, tile_row.geometry.bounds, align=True)
             dem_summed = np.nansum(dem)
             dem_sum_sqred = np.nansum(dem**2)
             dem_counted = (~np.isnan(dem)).sum()
@@ -139,10 +139,6 @@ def get_stats_s1_dem(folder: Path):
                 dem_sums[idx] += dem_summed
                 dem_sum_sqrs[idx] += dem_sum_sqred
                 dem_counts[idx] += dem_counted
-            if i > 50:
-                break
-        if j > 4:
-            break
 
     s1_means, s1_stds = [], []
     dem_means, dem_stds = [], []
@@ -177,6 +173,12 @@ def main(args):
     gff.normalisation.save(
         "hydroatlas_norm.csv", hydroatlas_bands, hydroatlas_mean, hydroatlas_std
     )
+
+    s1_mean, s1_std, dem_mean, dem_std = get_stats_s1_dem(args.data_path)
+
+    for x in range(gff.constants.N_PARTITIONS):
+        gff.normalisation.save(f"s1_norm_{x}.csv", ["VV", "VH"], s1_mean[x], s1_std[x])
+        gff.normalisation.save(f"dem_norm_{x}.csv", ["dem"], dem_mean[x], dem_std[x])
 
 
 if __name__ == "__main__":

@@ -64,7 +64,7 @@ def main(args):
     gff.training.training_loop(C, model_folder, model, (train_dl, val_dl))
 
     # Evaluate the model
-    eval_results = gff.evaluation.evaluate_model(model, test_dl)
+    eval_results = gff.evaluation.evaluate_model_overall(model, test_dl)
     with open(model_folder / "eval_results.yml", "w") as f:
         yaml.safe_dump(eval_results, f)
 

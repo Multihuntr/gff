@@ -318,6 +318,52 @@ def get_s1_stem_from_meta(meta: dict):
     date_str = datetime.datetime.fromisoformat(meta["pre1_date"]).strftime("%Y-%m-%d")
     return f'{meta['key']}-{date_str}'
 
+def meta_in_date_range(meta: dict, valid_date_range: tuple, window: int):
+    start, end = valid_date_range
+    post_d = datetime.datetime.fromisoformat(meta["post_date"])
+    window_start = post_d - datetime.timedelta(days=window)
+    return (window_start.timestamp() >= start.timestamp()) and (
+        post_d.timestamp() <= end.timestamp()
+    )
+
+def get_valid_date_range(era5_folder, era5L_folder, all_fnames, weather_window: int):
+    era5_date_fmt = "%Y-%m"
+    weather_delta = datetime.timedelta(days=weather_window)
+    # filenames like *-YYYY-mm.tif
+    era5_filenames = list((era5_folder).glob("*"))
+    era5_filenames.sort()
+    era5_start_str = "-".join(era5_filenames[0].stem.split("-")[-2:])
+    era5_start = datetime.datetime.strptime(era5_start_str, era5_date_fmt)
+    era5_start += weather_delta
+    era5_end_str = "-".join(era5_filenames[-1].stem.split("-")[-2:])
+    era5_end = datetime.datetime.strptime(era5_end_str, era5_date_fmt)
+
+    era5L_filenames = list((era5L_folder).glob("*"))
+    era5L_filenames.sort()
+    era5L_start_str = "-".join(era5L_filenames[0].stem.split("-")[-2:])
+    era5L_start = datetime.datetime.strptime(era5L_start_str, era5_date_fmt)
+    era5L_start += weather_delta
+    era5L_end_str = "-".join(era5L_filenames[-1].stem.split("-")[-2:])
+    era5L_end = datetime.datetime.strptime(era5L_end_str, era5_date_fmt)
+
+    fname_dates = []
+    for fname in all_fnames:
+        # fnames like '*-YYYY-MM-DD-meta.json'
+        date_str = "-".join(fname.split("-")[-4:-1])
+        fname_dates.append(datetime.datetime.fromisoformat(date_str))
+    fname_dates.sort()
+    if len(all_fnames) > 0:
+        fname_start = fname_dates[0]
+        fname_end = fname_dates[-1]
+    else:
+        # If no fnames provided, limit date range to just era5 files
+        fname_start = era5L_start
+        fname_end = era5L_end
+
+    start = max([era5_start, era5L_start, fname_start])
+    end = min([era5_end, era5L_end, fname_end])
+    return start, end
+
 
 # UNTESTED. Don't use.
 # def np_cache(maxsize=128):

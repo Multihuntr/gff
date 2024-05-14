@@ -12,6 +12,7 @@ import skimage
 import tqdm
 
 
+import gff.constants
 import gff.generate.util
 
 

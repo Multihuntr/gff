@@ -86,7 +86,13 @@ def main(args):
         "INTERLEAVE": "BAND",
     }
 
-    floodmap_path = args.data_path / "floodmaps" / "final"
+    # Get valid date range as the minimum across both
+    max_days = 365
+    era5_path = args.data_path / gff.constants.ERA5_FOLDER
+    era5L_path = args.data_path / gff.constants.ERA5L_FOLDER
+    valid_date_range = gff.util.get_valid_date_range(era5_path, era5L_path, [], max_days)
+
+    floodmap_path = args.data_path / "rois"
     meta_paths = list(floodmap_path.glob("*-meta.json"))
     for i, path in enumerate(tqdm.tqdm(meta_paths)):
         with open(path) as f:
@@ -151,16 +157,15 @@ def main(args):
         # Output ERA5
 
         # Don't output if there's no valid dates
-        valid_date_range = gff.dataloaders.get_valid_date_range(args.data_path, [], 365)
-        if not gff.dataloaders.meta_in_date_range(meta, valid_date_range, 1):
+        if not gff.util.meta_in_date_range(meta, valid_date_range, 1):
             continue
 
         era5L_size_pix = (eyhi - eylo, exhi - exlo)
         end_date = datetime.datetime.fromisoformat(meta["post_date"])
-        start_date = end_date - datetime.timedelta(days=365)
+        start_date = end_date - datetime.timedelta(days=max_days)
         # Note, resampling done on load
         era5_keys, era5_data = gff.data_sources.load_era5(
-            args.data_path / gff.constants.ERA5_FOLDER,
+            era5_path,
             context_box,
             era5L_size_pix,
             start_date,
@@ -191,7 +196,7 @@ def main(args):
 
         # Output ERA5 Land
         era5L_keys, era5L_data = gff.data_sources.load_era5(
-            args.data_path / gff.constants.ERA5L_FOLDER,
+            era5L_path,
             context_box,
             era5L_size_pix,
             start_date,

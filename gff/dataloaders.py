@@ -75,27 +75,16 @@ class DebugFloodForecastDataset(torch.utils.data.Dataset):
         return example
 
 
-def meta_in_date_range(meta: dict, valid_date_range: tuple, window: int):
-    start, end = valid_date_range
-    post_d = datetime.datetime.fromisoformat(meta["post_date"])
-    window_start = post_d - datetime.timedelta(days=window)
-    return (window_start.timestamp() >= start.timestamp()) and (
-        post_d.timestamp() <= end.timestamp()
-    )
-
-
 class FloodForecastDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         folder: Path,
         C: dict,
-        valid_date_range: tuple[datetime.datetime, datetime.datetime],
         meta_fnames: list[str],
     ):
         self.folder = folder
         self.C = C
         self.floodmap_path = self.folder / "rois"
-        self.valid_date_range = valid_date_range
         self.meta_fnames = sorted(meta_fnames)
         self.metas = self.load_tile_metas()
         self.tiles = self.load_tile_geoms(self.metas)
@@ -110,9 +99,11 @@ class FloodForecastDataset(torch.utils.data.Dataset):
     def load_tile_metas(self):
         metas = []
         for meta_fname in self.meta_fnames:
-            with open(self.floodmap_path / meta_fname) as f:
-                meta = json.load(f)
-            if meta_in_date_range(meta, self.valid_date_range, self.C["weather_window"]):
+            # Some generated floodmaps mightn't be available due to not having ERA5
+            meta_fpath = self.floodmap_path / meta_fname
+            if meta_fpath.exists():
+                with open(meta_fpath) as f:
+                    meta = json.load(f)
                 metas.append(meta)
         return metas
 
@@ -265,45 +256,6 @@ def read_partitions(folder: Path, fold: int):
     return train_fnames, val_fnames, test_fnames
 
 
-def get_valid_date_range(folder, all_fnames, weather_window: int):
-    era5_date_fmt = "%Y-%m"
-    weather_delta = datetime.timedelta(days=weather_window)
-    # filenames like *-YYYY-mm.tif
-    era5_filenames = list((folder / gff.constants.ERA5_FOLDER).glob("*"))
-    era5_filenames.sort()
-    era5_start_str = "-".join(era5_filenames[0].stem.split("-")[-2:])
-    era5_start = datetime.datetime.strptime(era5_start_str, era5_date_fmt)
-    era5_start += weather_delta
-    era5_end_str = "-".join(era5_filenames[-1].stem.split("-")[-2:])
-    era5_end = datetime.datetime.strptime(era5_end_str, era5_date_fmt)
-
-    era5L_filenames = list((folder / gff.constants.ERA5L_FOLDER).glob("*"))
-    era5L_filenames.sort()
-    era5L_start_str = "-".join(era5L_filenames[0].stem.split("-")[-2:])
-    era5L_start = datetime.datetime.strptime(era5L_start_str, era5_date_fmt)
-    era5L_start += weather_delta
-    era5L_end_str = "-".join(era5L_filenames[-1].stem.split("-")[-2:])
-    era5L_end = datetime.datetime.strptime(era5L_end_str, era5_date_fmt)
-
-    fname_dates = []
-    for fname in all_fnames:
-        # fnames like '*-YYYY-MM-DD-meta.json'
-        date_str = "-".join(fname.split("-")[-4:-1])
-        fname_dates.append(datetime.datetime.fromisoformat(date_str))
-    fname_dates.sort()
-    if len(all_fnames) > 0:
-        fname_start = fname_dates[0]
-        fname_end = fname_dates[-1]
-    else:
-        # If no fnames provided, limit date range to just era5 files
-        fname_start = era5L_start
-        fname_end = era5L_end
-
-    start = max([era5_start, era5L_start, fname_start])
-    end = min([era5_end, era5L_end, fname_end])
-    return start, end
-
-
 def create(C, generator):
     data_folder = Path(C["data_folder"]).expanduser()
     if C["dataset"] == "debug_dataset":
@@ -312,11 +264,9 @@ def create(C, generator):
         test_ds = DebugFloodForecastDataset(data_folder, C)
     elif C["dataset"] == "forecast_dataset":
         train_fnames, val_fnames, test_fnames = read_partitions(data_folder, C["fold"])
-        all_fnames = sum([train_fnames, val_fnames, test_fnames], start=[])
-        valid_date_range = get_valid_date_range(data_folder, all_fnames, C["weather_window"])
-        train_ds = FloodForecastDataset(data_folder, C, valid_date_range, meta_fnames=train_fnames)
-        val_ds = FloodForecastDataset(data_folder, C, valid_date_range, meta_fnames=val_fnames)
-        test_ds = FloodForecastDataset(data_folder, C, valid_date_range, meta_fnames=test_fnames)
+        train_ds = FloodForecastDataset(data_folder, C, meta_fnames=train_fnames)
+        val_ds = FloodForecastDataset(data_folder, C, meta_fnames=val_fnames)
+        test_ds = FloodForecastDataset(data_folder, C, meta_fnames=test_fnames)
     else:
         raise NotImplementedError(f"Dataset {C['dataset']} not supported")
 

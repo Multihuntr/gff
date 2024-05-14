@@ -96,7 +96,7 @@ def get_stats_s1_dem(folder: Path):
         fpath = folder / "partitions" / f"floodmap_partition_{i}.txt"
         test_fnames.append(pandas.read_csv(fpath, header=None)[0].values.tolist())
 
-    fpaths = list((folder / "floodmaps" / "final").glob("*-meta.json"))
+    fpaths = list((folder / "rois").glob("*-meta.json"))
     for j, meta_fpath in enumerate(tqdm.tqdm(fpaths, desc="Files")):
         with open(meta_fpath) as f:
             meta = json.load(f)

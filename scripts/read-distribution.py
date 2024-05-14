@@ -17,7 +17,6 @@ def parse_args(argv):
 
     parser.add_argument("data_path", type=Path)
     parser.add_argument("hydroatlas_path", type=Path)
-    parser.add_argument("floodmap_name", type=str, default="vit")
     parser.add_argument("--hydroatlas_ver", type=int, default=10)
     parser.add_argument("--sites", type=int, default=200)
 
@@ -38,9 +37,6 @@ def main(args):
     flood_cache = args.data_path / "flood_distribution.json"
     # Hackily read the flood distribution
     flood_distr = gff.generate.basins.flood_distribution(None, None, cache_path=flood_cache)
-    exp_cont_sites, exp_basin_distr = gff.generate.basins.mk_expected_distribution(
-        flood_distr, n_sites=args.sites
-    )
 
     cur_basin_flood_distr = {
         i: {j: 0 for j in gff.constants.HYDROATLAS_CLIMATE_ZONE_NAMES}
@@ -54,7 +50,8 @@ def main(args):
         i: {j: 0 for j in gff.constants.HYDROATLAS_CLIMATE_ZONE_NAMES}
         for i in gff.constants.HYDROATLAS_CONTINENT_NAMES
     }
-    paths = list((args.data_path / "floodmaps" / args.floodmap_name).glob("*-meta.json"))
+    paths = list((args.data_path / "rois").glob("*-meta.json"))
+    n_basins = 0
     for meta_path in tqdm.tqdm(paths):
         with open(meta_path) as f:
             meta = json.load(f)
@@ -66,10 +63,16 @@ def main(args):
             basins08_df, shapely.ops.unary_union(geoms)
         )
         for clim_zone, count in basin_counts.iterrows():
+            n_basins += count.item()
             if meta["flooding"]:
                 cur_basin_flood_distr[continent][clim_zone] += count.item()
             else:
                 cur_basin_noflood_distr[continent][clim_zone] += count.item()
+
+    ratio_basins_to_sites = n_basins / len(paths)
+    exp_cont_sites, exp_basin_distr = gff.generate.basins.mk_expected_distribution(
+        flood_distr, n_sites=args.sites, est_basins_per_site=ratio_basins_to_sites
+    )
 
     distr = {
         "floods": flood_distr,

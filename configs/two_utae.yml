@@ -19,13 +19,13 @@ data_sources:
   - dem_local
   - s1
 
-batch_size: 2
+batch_size: 4
 lr: 0.001
 lr_decay: 0.97
 epochs: 20
-num_workers: 12
-scalar_freq: 16
-img_freq: 16
+num_workers: 4
+scalar_freq: 128
+img_freq: 32
 
 hydroatlas_keys:
   - aet_mm_uyr

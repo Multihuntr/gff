@@ -22,6 +22,8 @@ def train_epoch(
     device = next(model.parameters()).device
     f1 = torchmetrics.classification.MulticlassF1Score(3, average="macro", ignore_index=-100)
     f1.to(device)
+    f1_prog = torchmetrics.classification.MulticlassF1Score(3, average="macro", ignore_index=-100)
+    f1_prog.to(device)
     criterion = criterion.to(device)
     model.train()
     for i, example_cpu in enumerate(tqdm.tqdm(dataloader, desc="Training", leave=False)):
@@ -35,11 +37,17 @@ def train_epoch(
         loss.backward()
         optim.step()
 
-        this_f1 = f1(pred, targ[:, 0])
+        f1(pred, targ[:, 0])
+        f1_prog(pred, targ[:, 0])
         loss_float = loss.cpu().item()
         losses.append(loss_float)
         if ((i + 1) % scalar_freq) == 0:
-            write_scalars(loss_float, this_f1.cpu().item())
+            this_f1 = f1_prog.compute().cpu().item()
+            write_scalars(loss_float, this_f1)
+            f1_prog = torchmetrics.classification.MulticlassF1Score(
+                3, average="macro", ignore_index=-100
+            )
+            f1_prog.to(device)
         if ((i + 1) % img_freq) == 0:
             write_imgs(example_cpu, pred.detach().cpu(), targ.detach().cpu())
     return sum(losses) / len(losses), f1.compute().cpu().item()

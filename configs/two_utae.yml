@@ -19,6 +19,7 @@ data_sources:
   - dem_local
   - s1
 
+n_classes: 2
 batch_size: 4
 lr: 0.001
 lr_decay: 0.97

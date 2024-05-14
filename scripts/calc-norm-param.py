@@ -157,13 +157,15 @@ def main(args):
     era5_files = list(era5_folder.glob("*.tif"))
     era5_bands = gff.constants.ERA5_BANDS
     era5_mean, era5_std = get_stats_era5(era5_files, "ERA5", era5_bands)
-    gff.normalisation.save("era5_norm.csv", era5_bands, era5_mean, era5_std)
+    gff.normalisation.save(args.data_path, "era5_norm.csv", era5_bands, era5_mean, era5_std)
 
     era5l_folder = args.data_path / gff.constants.ERA5L_FOLDER
     era5l_files = list(era5l_folder.glob("*.tif"))
     era5l_bands = gff.constants.ERA5L_BANDS
     era5l_mean, era5l_std = get_stats_era5(era5l_files, "ERA5-Land", era5l_bands)
-    gff.normalisation.save("era5_land_norm.csv", era5l_bands, era5l_mean, era5l_std)
+    gff.normalisation.save(
+        args.data_path, "era5_land_norm.csv", era5l_bands, era5l_mean, era5l_std
+    )
 
     hydroatlas_fpath = args.data_path / gff.constants.HYDROATLAS_RASTER_FNAME
     hydroatlas_mean, hydroatlas_std, hydroatlas_bands = get_stats_hydroatlas(
@@ -171,14 +173,18 @@ def main(args):
     )
 
     gff.normalisation.save(
-        "hydroatlas_norm.csv", hydroatlas_bands, hydroatlas_mean, hydroatlas_std
+        args.data_path, "hydroatlas_norm.csv", hydroatlas_bands, hydroatlas_mean, hydroatlas_std
     )
 
     s1_mean, s1_std, dem_mean, dem_std = get_stats_s1_dem(args.data_path)
 
     for x in range(gff.constants.N_PARTITIONS):
-        gff.normalisation.save(f"s1_norm_{x}.csv", ["VV", "VH"], s1_mean[x], s1_std[x])
-        gff.normalisation.save(f"dem_norm_{x}.csv", ["dem"], dem_mean[x], dem_std[x])
+        gff.normalisation.save(
+            args.data_path, f"s1_norm_{x}.csv", ["VV", "VH"], s1_mean[x], s1_std[x]
+        )
+        gff.normalisation.save(
+            args.data_path, f"dem_norm_{x}.csv", ["dem"], dem_mean[x], dem_std[x]
+        )
 
 
 if __name__ == "__main__":

@@ -141,12 +141,20 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         hybas_key = "HYBAS_ID" if "HYBAS_ID" in meta else "HYBAS_ID_4"
         continent = int(str(meta[hybas_key])[0])
         context_res = (gff.constants.CONTEXT_RESOLUTION,) * 2
+
+        targ = gff.util.get_tile(floodmap_path, geom.bounds, align=True).astype(np.int64)
+        targ[targ > 2] = -100  # This index will be ignored
+        if self.C["n_classes"] == 2:
+            # Flatten target labels to just no-water/water
+            targ[targ == 2] = 1
         result = {
-            "floodmap": gff.util.get_tile(floodmap_path, geom.bounds, align=True).astype(np.int64),
+            "floodmap": targ,
             "continent": continent,
+            "crs": crs,
             "geom": geom,
             "context_geom": context_geom,
             "s1_lead_days": self.get_s1_lead_days(meta),
+            "fpaths": {"floodmap": floodmap_path},
         }
 
         # Add in various data sources
@@ -155,23 +163,27 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         weather_end = datetime.datetime.fromisoformat(meta[f"{future_name}_date"])
         weather_start = weather_end - datetime.timedelta(days=(self.C["weather_window"] - 1))
         if "era5_land" in self.C["data_sources"]:
+            fpath = floodmap_path.with_name(floodmap_path.stem + "-era5-land.tif")
             data = gff.data_sources.load_exported_era5(
-                floodmap_path.with_name(floodmap_path.stem + "-era5-land.tif"),
+                fpath,
                 context_geom,
                 weather_start,
                 weather_end,
                 keys=self.C["era5_land_keys"],
             )
             result["era5_land"] = np.array(data, dtype=np.float32)
+            result["fpaths"]["era5_land"] = fpath
         if "era5" in self.C["data_sources"]:
+            fpath = floodmap_path.with_name(floodmap_path.stem + "-era5.tif")
             data = gff.data_sources.load_exported_era5(
-                floodmap_path.with_name(floodmap_path.stem + "-era5.tif"),
+                fpath,
                 context_geom,
                 weather_start,
                 weather_end,
                 keys=self.C["era5_keys"],
             )
             result["era5"] = np.array(data, dtype=np.float32)
+            result["fpaths"]["era5"] = fpath
 
         # (Relatively) static soil attributes
         if "hydroatlas_basin" in self.C["data_sources"]:
@@ -188,6 +200,7 @@ class FloodForecastDataset(torch.utils.data.Dataset):
                     resampling=rasterio.enums.Resampling.bilinear,
                 )
             result["hydroatlas_basin"] = np.array(data, dtype=np.float32)
+            result["fpaths"]["hydroatlas_basin"] = fpath
 
         # DEM at coarse and fine scales
         if "dem_context" in self.C["data_sources"]:
@@ -204,23 +217,28 @@ class FloodForecastDataset(torch.utils.data.Dataset):
                 nan_mask = data == tif.nodata
             result["dem_context"] = np.array(data, dtype=np.float32)
             result["dem_context"][nan_mask] = np.nan
+            result["fpaths"]["dem_context"] = fpath
         if "dem_local" in self.C["data_sources"]:
             fpath = floodmap_path.with_name(floodmap_path.stem + "-dem-local.tif")
             data = gff.util.get_tile(fpath, geom.bounds, align=True)
             result["dem_local"] = np.array(data, dtype=np.float32)
+            result["fpaths"]["dem_local"] = fpath
 
         # Sentinel 1 (assumed to be a proxy for soil moisture)
         if "s1" in self.C["data_sources"]:
             s1_stem = gff.util.get_s1_stem_from_meta(meta)
             s1_path = self.floodmap_path / f"{s1_stem}-s1.tif"
             result["s1"] = gff.util.get_tile(s1_path, geom.bounds, align=True)
+            result["fpaths"]["s1"] = fpath
             if np.isnan(result["s1"]).sum() > 0:
                 raise Exception("NO! It can't be!")
 
         return result
 
 
-def sometimes_things_are_lists(original_batch, as_list=["continent", "geom", "context_geom"]):
+def sometimes_things_are_lists(
+    original_batch, as_list=["continent", "crs", "geom", "context_geom", "fpaths"]
+):
     """A custom collation function which lets things be lists instead of tensors"""
     keys = list(original_batch[0].keys())
     result = {key: [] for key in keys}

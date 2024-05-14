@@ -13,25 +13,17 @@ import gff.training
 import gff.util
 
 
-def pair(str):
-    """For commandline argument parsing"""
-    k, v = str.split("|")
-    if v.isdigit():
-        v = int(v)
-    else:
-        try:
-            v = float(v)
-        except ValueError:
-            pass
-    return k, v
-
-
 def parse_args(argv):
     parser = argparse.ArgumentParser("Train a model")
 
     parser.add_argument("config_path", type=Path)
     parser.add_argument(
-        "--overwrite", "-o", type=pair, nargs="*", default=[], help="Overwrite config setting"
+        "--overwrite",
+        "-o",
+        type=gff.util.pair,
+        nargs="*",
+        default=[],
+        help="Overwrite config setting",
     )
 
     return parser.parse_args(argv)
@@ -64,7 +56,7 @@ def main(args):
     gff.training.training_loop(C, model_folder, model, (train_dl, val_dl))
 
     # Evaluate the model
-    eval_results = gff.evaluation.evaluate_model_overall(model, test_dl)
+    eval_results = gff.evaluation.evaluate_model(model, test_dl)
     with open(model_folder / "eval_results.yml", "w") as f:
         yaml.safe_dump(eval_results, f)
 

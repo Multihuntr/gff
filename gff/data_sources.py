@@ -418,10 +418,15 @@ def load_pregenerated_raster(
         )
 
 
-def get_climate_zone(folder: Path, geom: shapely.Geometry):
+def get_climate_zone_from_static(folder: Path, geom: shapely.Geometry):
     fpath = folder / constants.HYDROATLAS_RASTER_FNAME
-    with rasterio.open(fpath) as tif:
-        px = util.convert_affine(geom.centroid, ~tif.transform)
+    return get_climate_zone(fpath)
+
+
+def get_climate_zone(hydro_fpath: Path, geom: shapely.Geometry, geom_crs: str):
+    with rasterio.open(hydro_fpath) as tif:
+        geom_in_crs = util.convert_crs(geom, geom_crs, tif.crs)
+        px = util.convert_affine(geom_in_crs.centroid, ~tif.transform)
         x, y = shapely.get_coordinates(px)[0]
         window = ((y, y + 1), (x, x + 1))
         band_idx = 1 + tif.descriptions.index(constants.HYDROATLAS_CLIMATE_ZONE_BAND_NAME)

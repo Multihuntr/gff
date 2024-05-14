@@ -52,6 +52,7 @@ class TwoUTAE(nn.Module):
         self.w_dem_context = w_dem_context
         self.w_dem_local = w_dem_local
         self.w_s1 = w_s1
+        self.n_predict = n_predict
         self.weather_window_size = weather_window_size
 
         # Store normalisation info on model

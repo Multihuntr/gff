@@ -171,7 +171,7 @@ def get_tile(
     bounds: tuple[float, float, float, float] = None,
     bounds_px: tuple[int, int, int, int] = None,
     bounds_in_px: bool = False,
-    align: bool = False
+    align: bool = False,
 ):
     if isinstance(p, Path):
         tif = rasterio.open(p)
@@ -314,9 +314,23 @@ def seed_packages(seed):
 # The ol' misc. functions
 
 
+def pair(str):
+    """For commandline argument parsing"""
+    k, v = str.split("|")
+    if v.isdigit():
+        v = int(v)
+    else:
+        try:
+            v = float(v)
+        except ValueError:
+            pass
+    return k, v
+
+
 def get_s1_stem_from_meta(meta: dict):
     date_str = datetime.datetime.fromisoformat(meta["pre1_date"]).strftime("%Y-%m-%d")
-    return f'{meta['key']}-{date_str}'
+    return f"{meta['key']}-{date_str}"
+
 
 def meta_in_date_range(meta: dict, valid_date_range: tuple, window: int):
     start, end = valid_date_range
@@ -325,6 +339,7 @@ def meta_in_date_range(meta: dict, valid_date_range: tuple, window: int):
     return (window_start.timestamp() >= start.timestamp()) and (
         post_d.timestamp() <= end.timestamp()
     )
+
 
 def get_valid_date_range(era5_folder, era5L_folder, all_fnames, weather_window: int):
     era5_date_fmt = "%Y-%m"

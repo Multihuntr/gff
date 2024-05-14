@@ -120,11 +120,6 @@ def train_epoch(
         example = gff.util.recursive_todevice(example_cpu, device)
         targ = example.pop("floodmap")
         pred = model(example)
-        targ[targ > 2] = -100  # To make criterion ignore weird numbers from Kuro Siwo
-
-        if n_classes == 2:
-            # Flatten target labels to just no-water/water
-            targ[targ == 2] = 1
 
         optim.zero_grad()
         loss = criterion(pred, targ[:, 0])
@@ -164,11 +159,6 @@ def val_epoch(model, dataloader, criterion, n_classes, limit: int = None):
             example = gff.util.recursive_todevice(example, device)
             targ = example.pop("floodmap")
             pred = model(example)
-            targ[targ > 2] = -100
-
-            if n_classes == 2:
-                # Flatten target labels to just no-water/water
-                targ[targ == 2] = 1
 
             loss = criterion(pred, targ[:, 0])
 

@@ -39,6 +39,7 @@ def evaluate_model(model: nn.Module, dataloader: torch.utils.data.DataLoader):
         targ = example.pop("floodmap")
         pred = model(example)  # [B, C, H, W]
 
+        overall_f1(pred, targ[:, 0])
         pred_oh = pred.argmax(dim=1)
         for b, (pred_map, targ_map) in enumerate(zip(pred_oh, targ[:, 0])):
             continent = example["continent"][b]

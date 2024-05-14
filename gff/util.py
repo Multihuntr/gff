@@ -327,6 +327,21 @@ def pair(str):
     return k, v
 
 
+def save_tiles(tiles, tile_stats, fpath, crs):
+    n_bg, n_pw, n_fl = list(zip(*tile_stats))
+    df = geopandas.GeoDataFrame(
+        {
+            "geometry": tiles,
+            "n_background": n_bg,
+            "n_permanent_water": n_pw,
+            "n_flooded": n_fl,
+        },
+        geometry="geometry",
+        crs=crs,
+    )
+    df.to_file(fpath)
+
+
 def get_s1_stem_from_meta(meta: dict):
     date_str = datetime.datetime.fromisoformat(meta["pre1_date"]).strftime("%Y-%m-%d")
     return f"{meta['key']}-{date_str}"

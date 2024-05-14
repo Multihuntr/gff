@@ -5,7 +5,6 @@ import json
 import sys
 from pathlib import Path
 
-import asf_search as asf
 import geopandas
 import numpy as np
 import rasterio
@@ -13,6 +12,7 @@ import shapely
 import tqdm
 
 import gff.constants
+import gff.data_sources
 import gff.generate.floodmaps
 import gff.generate.search
 import gff.util
@@ -108,11 +108,10 @@ def main(args):
         geoms_np = np.array(geoms)
         geoms_np_4326 = gff.util.convert_crs(geoms_np, "EPSG:3857", basins04_df.crs)
         hybas_id, geom_mask = gff.util.tile_mask_for_basin(geoms_np_4326, basins04_df)
-        geoms_np_masked = geoms_np[~geom_mask]
-        geoms_df = geopandas.GeoDataFrame(
-            geoms_np_masked, columns=["geometry"], geometry="geometry", crs="EPSG:3857"
-        )
-        geoms_df.to_file(lbl_folder / geoms_fname)
+
+        out_geoms = []
+        geom_stats = []
+        n_flooded = 0
 
         # Create label TIFs: Write tiles
         profile = mk_tif_profile(paths[0], infos[0], geoms)
@@ -126,8 +125,19 @@ def main(args):
                 target_file = [name for name in info["datasets"] if "MK0_MLU_" in name][0]
                 with rasterio.open(path / f"{target_file}.tif") as in_tif:
                     target_data = in_tif.read()
+
+                # Store metadata for export
+                out_geoms.append(geom)
+                stats = gff.data_sources.ks_water_stats(target_data)
+                geom_stats.append(stats)
+                n_flooded += 1 if gff.generate.floodmaps.tile_flooded(stats) else 0
+
+                # Write to merged tif
                 window = gff.util.shapely_bounds_to_rasterio_window(geom.bounds, out_tif.transform)
                 out_tif.write(target_data, window=window)
+
+        geom_fpath = lbl_folder / geoms_fname
+        gff.util.save_tiles(out_geoms, geom_stats, geom_fpath, "EPSG:3857")
 
         # Create merged s1 TIFs: Write tiles
         s1_profile = {**profile, **gff.constants.S1_PROFILE_DEFAULTS}
@@ -200,7 +210,7 @@ def main(args):
             "post_date": standardise_iso_fmt(infos[0]["sources"]["MS1"]["source_date"]),
             "floodmap": str(fname),
             "visit_tiles": str(geoms_fname),
-            "flood_tiles": str(geoms_fname),
+            "n_flooded": n_flooded,
             "info": infos[0],
             "flooding": True,
         }

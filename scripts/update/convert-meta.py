@@ -50,7 +50,7 @@ def move_json_coords_to_gpkg(args):
     print(f"Checked {count} files")
 
 
-def main(args):
+def standardise_key(args):
     for path in args.data_path.glob("*-meta.json"):
         with open(path) as f:
             meta = json.load(f)
@@ -63,6 +63,15 @@ def main(args):
         if "s1" in meta:
             del meta["s1"]
 
+        with open(path, "w") as f:
+            json.dump(meta, f)
+
+
+def main(args):
+    for path in args.data_path.glob("*-meta.json"):
+        with open(path) as f:
+            meta = json.load(f)
+        del meta["flood_tiles"]
         with open(path, "w") as f:
             json.dump(meta, f)
 

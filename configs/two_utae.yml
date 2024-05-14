@@ -6,6 +6,7 @@ name: two_utae
 model: two_utae
 hydroatlas_dim: 16
 lead_time_dim: 16
+context_embed_output_dim: 5
 device: cuda:0
 
 dataset: forecast_dataset
@@ -20,12 +21,12 @@ data_sources:
   - s1
 
 n_classes: 2
-batch_size: 4
+batch_size: 16
 lr: 0.001
 lr_decay: 0.97
 epochs: 20
 num_workers: 4
-scalar_freq: 128
+scalar_freq: 64
 img_freq: 32
 
 hydroatlas_keys:

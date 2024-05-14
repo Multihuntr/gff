@@ -192,7 +192,7 @@ def create_flood_maps(
             this_prescribed_tiles = prescribed_tiles[map_idx]
         else:
             this_prescribed_tiles = None
-        visit_tiles, flood_tiles, s1_export_paths = progressively_grow_floodmaps(
+        visit_tiles, tile_stats, n_flooded, s1_export_paths = progressively_grow_floodmaps(
             s1_img_paths,
             rivers_df,
             data_folder,
@@ -214,12 +214,12 @@ def create_flood_maps(
             "post_date": search_results[search_idx[2]][0]["properties"]["startTime"],
             "floodmap": str(tif_filename),
             "visit_tiles": str(visit_filename),
-            "flood_tiles": str(flood_filename),
+            "n_flooded": n_flooded,
         }
         if export_s1:
             meta["s1"] = [str(p.relative_to(data_folder)) for p in s1_export_paths]
 
-        if len(flood_tiles) < 50:
+        if n_flooded < 50:
             print(" No major flooding found.")
             meta["flooding"] = False
         else:
@@ -240,12 +240,9 @@ def create_flood_maps(
             json.dump(meta, f)
         metas.append(meta)
 
-        kwargs = {"columns": ["geometry"], "geometry": "geometry", "crs": "EPSG:4326"}
-        visit_df = geopandas.GeoDataFrame(visit_tiles, **kwargs)
-        flood_df = geopandas.GeoDataFrame(flood_tiles, **kwargs)
-        visit_df.to_file(abs_floodmap_folder / visit_filename)
-        flood_df.to_file(abs_floodmap_folder / flood_filename)
-        if len(flood_tiles) >= 50:
+        fpath = abs_floodmap_folder / visit_filename
+        util.save_tiles(visit_tiles, tile_stats, fpath, "EPSG:4326")
+        if n_flooded >= 50:
             break
 
     print(f"Completed floodmaps for {cross_term}.")
@@ -258,7 +255,7 @@ def progressively_grow_floodmaps(
     rivers_df: geopandas.GeoDataFrame,
     data_folder: Path,
     floodmap_path: Path,
-    flood_model: torch.nn.Module | callable,
+    flood_model: Union[torch.nn.Module, callable],
     tile_size: int = 224,
     export_s1: bool = False,
     print_freq: int = 0,
@@ -337,7 +334,8 @@ def progressively_grow_floodmaps(
                 s1_tifs.append(rasterio.open(s1_fpath, "w", **s1_profile))
 
     # Begin flood-fill search
-    visit_tiles, fill_tiles, flood_tiles = [], [], []
+    visit_tiles, fill_tiles = [], []
+    geom_stats = []
     raw_floodmap_path = floodmap_path.with_stem(floodmap_path.stem + "-raw")
     with rasterio.open(raw_floodmap_path, "w", **profile) as out_tif:
         n_visited = 0
@@ -374,6 +372,8 @@ def progressively_grow_floodmaps(
                     s1_tif.write(s1_inp_tile, window=window)
             out_tif.write(flood_cls, window=window)
             fill_tiles.append(tile_geom)
+            stats = data_sources.ks_water_stats(flood_cls)
+            geom_stats.append(stats)
 
             # Select new potential tiles (if not visited)
             if ((flood_cls == constants.KUROSIWO_PW_CLASS).mean() > 0.5) or (
@@ -381,8 +381,7 @@ def progressively_grow_floodmaps(
             ):
                 # Don't go into the ocean or large lakes
                 n_permanent += 1
-            elif check_flooded(flood_cls):
-                flood_tiles.append(tile_geom)
+            elif tile_flooded(stats):
                 n_flooded += 1
                 new_tiles = sel_new_tiles_big_window(tile_x, tile_y, *grid_size, add=3)
                 for tile in new_tiles:
@@ -413,7 +412,7 @@ def progressively_grow_floodmaps(
 
     print(" Tile search complete. Postprocessing outputs.")
     postprocess(raw_floodmap_path, floodmap_path, nodata=floodmap_nodata)
-    return fill_tiles, flood_tiles, s1_fpaths
+    return fill_tiles, geom_stats, n_flooded, s1_fpaths
 
 
 def remove_tiles_outside(meta_path: Path, basins_df: geopandas.GeoDataFrame):
@@ -421,11 +420,8 @@ def remove_tiles_outside(meta_path: Path, basins_df: geopandas.GeoDataFrame):
         meta = json.load(f)
 
     v_path = meta_path.parent / meta["visit_tiles"]
-    f_path = meta_path.parent / meta["flood_tiles"]
     visit_tiles = geopandas.read_file(v_path, engine="pyogrio", use_arrow=True)
-    flood_tiles = geopandas.read_file(f_path, engine="pyogrio", use_arrow=True)
     _, visit_mask = util.tile_mask_for_basin(visit_tiles.geometry, basins_df)
-    _, flood_mask = util.tile_mask_for_basin(flood_tiles.geometry, basins_df)
 
     # Write nodata to tiles outside majority basin
     with rasterio.open(meta_path.parent / meta["floodmap"], "r+") as tif:
@@ -438,9 +434,7 @@ def remove_tiles_outside(meta_path: Path, basins_df: geopandas.GeoDataFrame):
             )
 
     visit_tiles = visit_tiles[~visit_mask]
-    flood_tiles = flood_tiles[~flood_mask]
     visit_tiles.to_file(v_path, engine="pyogrio")
-    flood_tiles.to_file(f_path, engine="pyogrio")
 
 
 def major_upstream_riverways(basins_df, start, bounds, threshold=20000):
@@ -687,8 +681,9 @@ def s1_preprocess_edge_heuristic(tensors, threshold=0.05):
     return no_nan and not_too_many_zeros
 
 
-def check_flooded(tile, threshold=0.05):
-    return (tile == constants.KUROSIWO_FLOOD_CLASS).mean() > threshold
+def tile_flooded(stats, threshold=0.05):
+    n_bg, n_pw, n_fl = stats
+    return n_fl / (n_bg + n_pw + n_fl) > threshold
 
 
 def sel_new_tiles_big_window(tile_x, tile_y, xsize, ysize, add=3):

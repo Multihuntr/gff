@@ -431,3 +431,10 @@ def get_climate_zone(hydro_fpath: Path, geom: shapely.Geometry, geom_crs: str):
         window = ((y, y + 1), (x, x + 1))
         band_idx = 1 + tif.descriptions.index(constants.HYDROATLAS_CLIMATE_ZONE_BAND_NAME)
         return int(tif.read(band_idx, window=window).item())
+
+
+def ks_water_stats(tile: np.ndarray):
+    flood = tile == constants.KUROSIWO_FLOOD_CLASS
+    pwater = tile == constants.KUROSIWO_PW_CLASS
+    bg = tile == constants.KUROSIWO_BG_CLASS
+    return bg.sum(), pwater.sum(), flood.sum()

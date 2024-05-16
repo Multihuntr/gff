@@ -12,6 +12,7 @@ device: cuda:0
 dataset: forecast_dataset
 fold: 0
 weather_window: 20
+cache_era5_in_ram: True
 data_sources:
   - era5
   - era5_land
@@ -23,9 +24,9 @@ data_sources:
 n_classes: 2
 batch_size: 16
 lr: 0.001
-lr_decay: 0.95
-epochs: 4
-num_workers: 4
+lr_decay: 0.5
+epochs: 10
+num_workers: 2
 scalar_freq: 64
 img_freq: 32
 

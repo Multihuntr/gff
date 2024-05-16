@@ -373,12 +373,20 @@ def load_era5(
     return out_keys, results
 
 
+@functools.cache
+def _era5_data_ram(fpath: Path, band_idxs: tuple):
+    with rasterio.open(fpath) as tif:
+        data = tif.read(band_idxs)
+        return data, tif.transform
+
+
 def load_exported_era5(
     fpath: Path,
     geom: shapely.Geometry,
     start: datetime.datetime,
     end: datetime.datetime,
     keys: list[str],
+    cache_in_ram: bool = False,
 ):
     """For reading an exported raster already at the right resolution"""
     # Calculate the indices to read
@@ -389,12 +397,20 @@ def load_exported_era5(
         day_strs.append(current.strftime("%Y-%m-%d"))
         current += datetime.timedelta(days=1)
 
-    band_idxs = [band_index[day_str][k] for day_str in day_strs for k in keys]
+    band_idxs = tuple([band_index[day_str][k] for day_str in day_strs for k in keys])
 
-    with rasterio.open(fpath) as tif:
-        window = util.shapely_bounds_to_rasterio_window(geom.bounds, tif.transform, align=False)
-        data = tif.read(band_idxs, window=window, resampling=rasterio.enums.Resampling.bilinear)
-        data = einops.rearrange(data, "(I B) H W -> I B H W", I=len(day_strs), B=len(keys))
+    if cache_in_ram:
+        arr, transform = _era5_data_ram(fpath, band_idxs)
+        bounds_px = util.convert_affine(geom, ~transform).bounds
+        data = util.resample_bilinear_subpixel(arr, bounds_px)
+    else:
+        with rasterio.open(fpath) as tif:
+            T = tif.transform
+            window = util.shapely_bounds_to_rasterio_window(geom.bounds, T, align=False)
+            method = rasterio.enums.Resampling.bilinear
+            data = tif.read(band_idxs, window=window, resampling=method)
+
+    data = einops.rearrange(data, "(I B) H W -> I B H W", I=len(day_strs), B=len(keys))
 
     return data
 

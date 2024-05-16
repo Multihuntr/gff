@@ -166,6 +166,27 @@ def resample_xr(
     return arr.interp(x=xs, y=ys, method=method, kwargs={"fill_value": "extrapolate"})
 
 
+def resample_bilinear_subpixel(arr, bounds):
+    """The special case for bilinear interpolation where you only want sub-pixel resampling"""
+    xlo, ylo, xhi, yhi = bounds
+    xoff = xlo % 1
+    yoff = ylo % 1
+    w = round(xhi - xlo)
+    h = round(yhi - ylo)
+    x = int(xlo)
+    y = int(ylo)
+
+    xlin = (
+        arr[..., y : y + h + 1, x : x + w] * (1 - xoff)
+        + arr[..., y : y + h + 1, x + 1 : x + w + 1] * xoff
+    )
+    ylin = xlin[..., :h, :] * (1 - yoff) + xlin[..., 1 : h + 1, :] * yoff
+    # This is most similar I could come up with to rasterio's resampling;
+    # When including the y would cause a nan, just use x resample.
+    out = np.where(np.isnan(ylin), xlin[..., 1 : h + 1, :], ylin)
+    return out
+
+
 def get_tile(
     p: Union[Path, rasterio.DatasetReader],
     bounds: tuple[float, float, float, float] = None,

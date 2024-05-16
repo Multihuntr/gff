@@ -170,6 +170,7 @@ class FloodForecastDataset(torch.utils.data.Dataset):
                 weather_start,
                 weather_end,
                 keys=self.C["era5_land_keys"],
+                cache_in_ram=self.C["cache_era5_in_ram"],
             )
             result["era5_land"] = np.array(data, dtype=np.float32)
             result["fpaths"]["era5_land"] = fpath
@@ -181,6 +182,7 @@ class FloodForecastDataset(torch.utils.data.Dataset):
                 weather_start,
                 weather_end,
                 keys=self.C["era5_keys"],
+                cache_in_ram=self.C["cache_era5_in_ram"],
             )
             result["era5"] = np.array(data, dtype=np.float32)
             result["fpaths"]["era5"] = fpath

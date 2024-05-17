@@ -254,6 +254,9 @@ class UTAE(nn.Module):
         positional_encoding=True,
         scale_by=1,
         cond_dim=None,
+        temp_encoding="ltae",
+        input_size=128, # for RecUNet
+        hidden_dim=64 # for RecUNet
     ):
         """
         U-TAE architecture for spatio-temporal encoding of satellite image time series.
@@ -304,6 +307,8 @@ class UTAE(nn.Module):
         self.pad_value = pad_value
         self.encoder = encoder
         self.scale_by = scale_by
+        self.temp_encoding = temp_encoding
+
         if encoder:
             self.return_maps = True
 
@@ -331,6 +336,8 @@ class UTAE(nn.Module):
         """
 
         # ENCODER
+        print('sep', input_dim, encoder_widths)
+        print('n kernels', [input_dim] + [encoder_widths[0]])
         self.in_conv = ConvBlock(
             nkernels=[input_dim] + [encoder_widths[0]],
             k=1,
@@ -374,15 +381,48 @@ class UTAE(nn.Module):
             for i in range(self.n_stages - 1, 0, -1)
         )
         # LTAE
-        self.temporal_encoder = LTAE2d(
-            in_channels=encoder_widths[-1],
-            d_model=d_model,
-            n_head=n_head,
-            mlp=[d_model, encoder_widths[-1]],
-            return_att=True,
-            d_k=d_k,
-            positional_encoding=positional_encoding,
-        )
+        if self.temp_encoding=='ltae':
+            self.temporal_encoder = LTAE2d(
+                in_channels=encoder_widths[-1],
+                d_model=d_model,
+                n_head=n_head,
+                mlp=[d_model, encoder_widths[-1]],
+                return_att=True,
+                d_k=d_k,
+                positional_encoding=positional_encoding,
+            )
+        # RecUNet with LSTM
+        elif self.temp_encoding=='lstm':
+            # check why input size is specific to lstm implementation
+            #input size should maybe be defined from the input (e.g. cH, cW) and not a set lstm parameter?
+            # read implementation of lstm of VSFG
+            size = int(input_size / str_conv_s ** (self.n_stages - 1))
+            print('lstm size', size)
+            self.temporal_encoder = ConvLSTM(
+                input_dim=encoder_widths[-1],
+                input_size=(size, size),
+                hidden_dim=hidden_dim,
+                kernel_size=(3, 3),
+            )
+            self.out_convlstm = nn.Conv2d(
+                in_channels=hidden_dim,
+                out_channels=encoder_widths[-1],
+                kernel_size=3,
+                padding=1,
+            )
+            agg_mode='mean'
+        # elif self.temp_encoding=='conv':
+        #     ############ HERE CHANGE TO CONV
+        #     self.temporal_encoder = LTAE2d(
+        #         in_channels=encoder_widths[-1],
+        #         d_model=d_model,
+        #         n_head=n_head,
+        #         mlp=[d_model, encoder_widths[-1]],
+        #         return_att=True,
+        #         d_k=d_k,
+        #         positional_encoding=positional_encoding,
+        #     )
+
         self.temporal_aggregator = Temporal_Aggregator(mode=agg_mode)
         # note: not including normalization layer and ReLU nonlinearity into the final ConvBlock
         #       if inserting >1 layers into out_conv then consider treating normalizations separately
@@ -445,17 +485,35 @@ class UTAE(nn.Module):
         for i in range(self.n_stages - 1):
             out = self.down_blocks[i].smart_forward(feature_maps[-1], lead)
             feature_maps.append(out)
+        print('ft map', len(feature_maps), feature_maps[-1].shape)
         # TEMPORAL ENCODER
+
+        if self.temp_encoding == 'ltae':
+            out, att = self.temporal_encoder(
+            feature_maps[-1], batch_positions=batch_positions, pad_mask=pad_mask
+            )
+            print('temp enc out dim', out.shape) # 8 32 16 16 for lstm
+        elif self.temp_encoding == "lstm":
+            print('feat maps', feature_maps[-1].shape)
+            _, out = self.temporal_encoder(feature_maps[-1], pad_mask=pad_mask)
+            out = out[0][1]  # take last cell state as embedding
+            out = self.out_convlstm(out)
+            print('out temp enc', out.shape)
+        # elif self.temporal == "conv":
+        #     out = self.temporal_encoder(feature_maps[-1], pad_mask=pad_mask)
+        #     out = self.out_convlstm(out)
+
         # feature_maps[-1].shape is torch.Size([B, T, 128, 32, 32])
         #   -> every attention pixel has an 8x8 receptive field
         # att.shape is torch.Size([h, B, T, 32, 32])
         # out.shape is torch.Size([B, 128, 32, 32]), in self-attention class it's Size([B*32*32*h=32768, 1, 16]
-        out, att = self.temporal_encoder(
-            feature_maps[-1], batch_positions=batch_positions, pad_mask=pad_mask
-        )
+        
         # SPATIAL DECODER
         if self.return_maps:
             maps = [out]
+        
+        if self.temp_encoding == 'lstm':
+            att = None
         for i in range(self.n_stages - 1):
             skip = self.temporal_aggregator(
                 feature_maps[-(i + 2)], pad_mask=pad_mask, attn_mask=att
@@ -463,6 +521,7 @@ class UTAE(nn.Module):
             out = self.up_blocks[i](out, skip, lead)
             if self.return_maps:
                 maps.append(out)
+
 
         if self.encoder:
             return out, maps

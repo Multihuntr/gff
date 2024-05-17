@@ -48,7 +48,7 @@ class ConvLSTMCell(nn.Module):
 
     def forward(self, input_tensor, cur_state):
         h_cur, c_cur = cur_state
-
+        print('comb', input_tensor.shape, h_cur.shape)
         combined = torch.cat([input_tensor, h_cur], dim=1)  # concatenate along channel axis
 
         combined_conv = self.conv(combined)
@@ -105,6 +105,7 @@ class ConvLSTM(nn.Module):
         cell_list = []
         for i in range(0, self.num_layers):
             cur_input_dim = self.input_dim if i == 0 else self.hidden_dim[i - 1]
+            print('C', cur_input_dim, 'hidd', self.hidden_dim, 'inp', self.input_dim)
 
             cell_list.append(
                 ConvLSTMCell(
@@ -154,6 +155,7 @@ class ConvLSTM(nn.Module):
 
             h, c = hidden_state[layer_idx]
             output_inner = []
+            print('test', cur_layer_input[:, 0, :, :, :].shape, h.shape, c.shape)
             for t in range(seq_len):
                 h, c = self.cell_list[layer_idx](
                     input_tensor=cur_layer_input[:, t, :, :, :], cur_state=[h, c]

@@ -86,14 +86,12 @@ class TwoUTAE(nn.Module):
             context_embed_input_dim += hydroatlas_dim
         if self.w_dem_context:
             context_embed_input_dim += 1
-        print('ctx_in_dim', context_embed_input_dim)
         self.context_embed = utae.UTAE(
             context_embed_input_dim,
             encoder_widths=[32, 32],
             decoder_widths=[32, 32],
             out_conv=[context_embed_output_dim],
-            temp_encoding=self.temp_encoding,
-            input_size=32
+            temp_encoding=self.temp_encoding
         )
 
         # Create local embedding/prediction layers
@@ -114,8 +112,7 @@ class TwoUTAE(nn.Module):
             decoder_widths=[64, 64, 64, 128],
             out_conv=[64, n_predict],
             cond_dim=lead_time_dim,
-            temp_encoding=self.temp_encoding,
-            input_size=224
+            temp_encoding=self.temp_encoding
         )
 
     def normalise(self, ex, key, suffix=None):
@@ -148,7 +145,6 @@ class TwoUTAE(nn.Module):
 
     def forward(self, ex):
         B, N, cC, cH, cW = ex["era5_land"].shape
-        print(B, N, cC, cH, cW, 'utae')
         batch_positions = (
             torch.arange(0, N).reshape((1, N)).repeat((B, 1)).to(ex["era5_land"].device)
         )
@@ -187,19 +183,14 @@ class TwoUTAE(nn.Module):
             context_inp = torch.cat([era5l_inp, era5_inp, context_statics], dim=2)
         else:
             context_inp = torch.cat([era5l_inp, era5_inp], dim=2)
-        print('ctx inp', context_inp.shape)
         context_embedded = self.context_embed(context_inp, batch_positions)
-        print('ctx emb', context_embedded.shape)
         context_embedded = context_embedded[:, 0]
-        print('ctx emb', context_embedded.shape)
 
         # Select the central 2x2 pixels and average
         ylo, yhi = cH // 2 - 1, cH // 2 + 3
         xlo, xhi = cW // 2 - 1, cW // 2 + 3
         context_out = context_embedded[:, :, ylo:yhi, xlo:xhi].mean(axis=(2, 3), keepdims=True)
-        print('ctx out', context_out.shape)
         context_out_repeat = context_out.repeat((1, 1, fH, fW))
-        print('ctx repeat', context_out_repeat.shape)
 
         # Get Lead time embedding indexes
         if self.w_s1:
@@ -215,13 +206,10 @@ class TwoUTAE(nn.Module):
         if self.w_dem_local:
             local_lst.append(dem_local_inp)
         local_inp = torch.cat(local_lst, dim=1)
-        print('loc in', local_inp.shape)
         # Pretend it's temporal data with one time step for utae
         local_inp = local_inp[:, None]
-        print('loc in', local_inp.shape)
         out = self.local_embed(local_inp, batch_positions[:, :1], lead=lead)
         out = out[:, 0]
-        print('loc emb', out.shape)
         return out
 
 
@@ -247,10 +235,10 @@ if __name__ == "__main__":
     era5_bands = list(range(n_era5))
     era5l_bands = list(range(n_era5_land))
     hydroatlas_bands = list(range(n_hydroatlas))
-    model = TwoUTAE(era5_bands, era5l_bands, hydroatlas_bands, hydroatlas_dim, lead_time_dim,temp_encoding='lstm')
+    model = TwoUTAE(era5_bands, era5l_bands, hydroatlas_bands, hydroatlas_dim, lead_time_dim,temp_encoding='ltae')
     model = model.cuda()
     model1 = TwoUTAE(
-        era5_bands, era5l_bands, lead_time_dim=lead_time_dim, w_hydroatlas_basin=False,temp_encoding='lstm'
+        era5_bands, era5l_bands, lead_time_dim=lead_time_dim, w_hydroatlas_basin=False,temp_encoding='ltae'
     )
     model1 = model1.cuda()
     model2 = TwoUTAE(
@@ -259,7 +247,7 @@ if __name__ == "__main__":
         lead_time_dim=lead_time_dim,
         w_hydroatlas_basin=False,
         w_dem_context=False,
-        temp_encoding='lstm'
+        temp_encoding='ltae'
     )
     model2 = model2.cuda()
     model3 = TwoUTAE(
@@ -268,11 +256,11 @@ if __name__ == "__main__":
         lead_time_dim=lead_time_dim,
         w_hydroatlas_basin=False,
         w_dem_context=False,
-        temp_encoding='lstm'
+        temp_encoding='ltae'
     )
     model3 = model3.cuda()
     model4 = TwoUTAE(
-        era5_bands, era5l_bands, w_hydroatlas_basin=False, w_dem_context=False, w_s1=False,temp_encoding='lstm'
+        era5_bands, era5l_bands, w_hydroatlas_basin=False, w_dem_context=False, w_s1=False,temp_encoding='ltae'
     )
     model4 = model4.cuda()
     model5 = TwoUTAE(
@@ -282,7 +270,7 @@ if __name__ == "__main__":
         w_hydroatlas_basin=False,
         w_dem_context=False,
         w_dem_local=False,
-        temp_encoding='lstm'
+        temp_encoding='ltae'
     )
     model5 = model5.cuda()
     print("Model")

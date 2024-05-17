@@ -1,5 +1,5 @@
 seed: 6426452
-data_folder: ~/NFS_era5/gff
+data_folder: ~/NFS_Era5/gff
 
 name: two_utae
 
@@ -29,6 +29,7 @@ epochs: 20
 num_workers: 2
 scalar_freq: 64
 img_freq: 32
+temp_encoding: lstm
 
 hydroatlas_keys:
   - aet_mm_uyr

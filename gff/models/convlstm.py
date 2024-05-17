@@ -10,7 +10,7 @@ import torch
 
 
 class ConvLSTMCell(nn.Module):
-    def __init__(self, input_size, input_dim, hidden_dim, kernel_size, bias):
+    def __init__(self, input_dim, hidden_dim, kernel_size, bias):
         """
         Initialize ConvLSTM cell.
 
@@ -30,7 +30,6 @@ class ConvLSTMCell(nn.Module):
 
         super(ConvLSTMCell, self).__init__()
 
-        self.height, self.width = input_size
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
 
@@ -48,7 +47,6 @@ class ConvLSTMCell(nn.Module):
 
     def forward(self, input_tensor, cur_state):
         h_cur, c_cur = cur_state
-        print('comb', input_tensor.shape, h_cur.shape)
         combined = torch.cat([input_tensor, h_cur], dim=1)  # concatenate along channel axis
 
         combined_conv = self.conv(combined)
@@ -63,7 +61,8 @@ class ConvLSTMCell(nn.Module):
 
         return h_next, c_next
 
-    def init_hidden(self, batch_size, device):
+    def init_hidden(self, batch_size, input_size, device):
+        self.height, self.width = input_size
         return (
             Variable(torch.zeros(batch_size, self.hidden_dim, self.height, self.width)).to(device),
             Variable(torch.zeros(batch_size, self.hidden_dim, self.height, self.width)).to(device),
@@ -73,7 +72,6 @@ class ConvLSTMCell(nn.Module):
 class ConvLSTM(nn.Module):
     def __init__(
         self,
-        input_size,
         input_dim,
         hidden_dim,
         kernel_size,
@@ -92,7 +90,6 @@ class ConvLSTM(nn.Module):
         if not len(kernel_size) == len(hidden_dim) == num_layers:
             raise ValueError("Inconsistent list length.")
 
-        self.height, self.width = input_size
 
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
@@ -105,11 +102,9 @@ class ConvLSTM(nn.Module):
         cell_list = []
         for i in range(0, self.num_layers):
             cur_input_dim = self.input_dim if i == 0 else self.hidden_dim[i - 1]
-            print('C', cur_input_dim, 'hidd', self.hidden_dim, 'inp', self.input_dim)
 
             cell_list.append(
                 ConvLSTMCell(
-                    input_size=(self.height, self.width),
                     input_dim=cur_input_dim,
                     hidden_dim=self.hidden_dim[i],
                     kernel_size=self.kernel_size[i],
@@ -133,6 +128,7 @@ class ConvLSTM(nn.Module):
         -------
         last_state_list, layer_output
         """
+        input_size = [input_tensor.size(3), input_tensor.size(4)] 
         if not self.batch_first:
             # (t, b, c, h, w) -> (b, t, c, h, w)
             input_tensor.permute(1, 0, 2, 3, 4)
@@ -142,7 +138,7 @@ class ConvLSTM(nn.Module):
             raise NotImplementedError()
         else:
             hidden_state = self._init_hidden(
-                batch_size=input_tensor.size(0), device=input_tensor.device
+                batch_size=input_tensor.size(0), input_size=input_size, device=input_tensor.device
             )
 
         layer_output_list = []
@@ -155,7 +151,6 @@ class ConvLSTM(nn.Module):
 
             h, c = hidden_state[layer_idx]
             output_inner = []
-            print('test', cur_layer_input[:, 0, :, :, :].shape, h.shape, c.shape)
             for t in range(seq_len):
                 h, c = self.cell_list[layer_idx](
                     input_tensor=cur_layer_input[:, t, :, :, :], cur_state=[h, c]
@@ -178,10 +173,10 @@ class ConvLSTM(nn.Module):
 
         return layer_output_list, last_state_list
 
-    def _init_hidden(self, batch_size, device):
+    def _init_hidden(self, batch_size,input_size, device):
         init_states = []
         for i in range(self.num_layers):
-            init_states.append(self.cell_list[i].init_hidden(batch_size, device))
+            init_states.append(self.cell_list[i].init_hidden(batch_size, input_size, device))
         return init_states
 
     @staticmethod

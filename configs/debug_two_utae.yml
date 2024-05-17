@@ -6,6 +6,7 @@ name: debug_two_utae_random_data
 model: two_utae
 hydroatlas_dim: 16
 lead_time_dim: 16
+context_embed_output_dim: 5
 device: cuda:0
 
 dataset: debug_dataset

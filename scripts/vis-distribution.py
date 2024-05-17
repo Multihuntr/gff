@@ -18,7 +18,7 @@ def parse_args(argv):
     return parser.parse_args(argv)
 
 
-def mk_bar_graph(clim_distrs, labels, xlabel, fname, title=None, ylabel=None):
+def mk_bar_graph(clim_distrs, labels, xlabel, fnames, title=None, ylabel=None):
     fig, ax = plt.subplots(1, 1, figsize=(6, 3.5), dpi=300)
 
     index = np.array(list(gff.constants.HYDROATLAS_CLIMATE_ZONE_NAMES))
@@ -47,7 +47,8 @@ def mk_bar_graph(clim_distrs, labels, xlabel, fname, title=None, ylabel=None):
     ax.legend()
     fig.tight_layout()
 
-    fig.savefig(fname)
+    for fname in fnames:
+        fig.savefig(fname)
     plt.close(fig)
 
 
@@ -76,13 +77,13 @@ def main(args):
             as_np[k][i] = overall_clim[k][str(z)]
 
     mk_bar_graph(
-        [[as_np["expected"]], [as_np["created"], as_np["negatives"]]],
+        [[as_np["expected"]], [as_np["created"], as_np["negatives"] / 2]],
         [
             ["Expected distribution"],
             ["Generated distribution (flood)", "Generated distribution (no-flood)"],
         ],
         xlabel="Climate zone",
-        fname="vis/distr.png",
+        fnames=["vis/clim-zone-distr.png", "vis/clim-zone-distr.eps"],
         title="Overall distribution",
     )
 

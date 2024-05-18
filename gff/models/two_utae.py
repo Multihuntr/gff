@@ -43,6 +43,7 @@ class TwoUTAE(nn.Module):
         n_predict=3,
         weather_window_size=20,
         context_embed_output_dim=3,
+        temp_encoding="ltae"
     ):
         super().__init__()
         self.era5_bands = era5_bands
@@ -54,6 +55,7 @@ class TwoUTAE(nn.Module):
         self.w_s1 = w_s1
         self.n_predict = n_predict
         self.weather_window_size = weather_window_size
+        self.temp_encoding = temp_encoding
 
         # Store normalisation info on model
         # (To load model weights, the shapes must be identical; so use empty if not known at init)
@@ -89,6 +91,7 @@ class TwoUTAE(nn.Module):
             encoder_widths=[32, 32],
             decoder_widths=[32, 32],
             out_conv=[context_embed_output_dim],
+            temp_encoding=self.temp_encoding
         )
 
         # Create local embedding/prediction layers
@@ -109,6 +112,7 @@ class TwoUTAE(nn.Module):
             decoder_widths=[64, 64, 64, 128],
             out_conv=[64, n_predict],
             cond_dim=lead_time_dim,
+            temp_encoding=self.temp_encoding
         )
 
     def normalise(self, ex, key, suffix=None):
@@ -231,10 +235,10 @@ if __name__ == "__main__":
     era5_bands = list(range(n_era5))
     era5l_bands = list(range(n_era5_land))
     hydroatlas_bands = list(range(n_hydroatlas))
-    model = TwoUTAE(era5_bands, era5l_bands, hydroatlas_bands, hydroatlas_dim, lead_time_dim)
+    model = TwoUTAE(era5_bands, era5l_bands, hydroatlas_bands, hydroatlas_dim, lead_time_dim,temp_encoding='ltae')
     model = model.cuda()
     model1 = TwoUTAE(
-        era5_bands, era5l_bands, lead_time_dim=lead_time_dim, w_hydroatlas_basin=False
+        era5_bands, era5l_bands, lead_time_dim=lead_time_dim, w_hydroatlas_basin=False,temp_encoding='ltae'
     )
     model1 = model1.cuda()
     model2 = TwoUTAE(
@@ -243,6 +247,7 @@ if __name__ == "__main__":
         lead_time_dim=lead_time_dim,
         w_hydroatlas_basin=False,
         w_dem_context=False,
+        temp_encoding='ltae'
     )
     model2 = model2.cuda()
     model3 = TwoUTAE(
@@ -251,10 +256,11 @@ if __name__ == "__main__":
         lead_time_dim=lead_time_dim,
         w_hydroatlas_basin=False,
         w_dem_context=False,
+        temp_encoding='ltae'
     )
     model3 = model3.cuda()
     model4 = TwoUTAE(
-        era5_bands, era5l_bands, w_hydroatlas_basin=False, w_dem_context=False, w_s1=False
+        era5_bands, era5l_bands, w_hydroatlas_basin=False, w_dem_context=False, w_s1=False,temp_encoding='ltae'
     )
     model4 = model4.cuda()
     model5 = TwoUTAE(
@@ -264,6 +270,7 @@ if __name__ == "__main__":
         w_hydroatlas_basin=False,
         w_dem_context=False,
         w_dem_local=False,
+        temp_encoding='ltae'
     )
     model5 = model5.cuda()
     print("Model")

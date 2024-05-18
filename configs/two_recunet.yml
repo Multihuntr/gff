@@ -1,20 +1,18 @@
 seed: 6426452
 data_folder: ~/NFS_Era5/gff
 
-name: debug_two_utae_random_data
+name: two_utae
 
 model: two_utae
 hydroatlas_dim: 16
 lead_time_dim: 16
 context_embed_output_dim: 5
-weather_window: 20
 device: cuda:0
 
-dataset: debug_dataset
+dataset: forecast_dataset
 fold: 0
-checkerboard: True
-n_examples: 4
-n_times: 12
+weather_window: 20
+cache_era5_in_ram: True
 data_sources:
   - era5
   - era5_land
@@ -23,15 +21,15 @@ data_sources:
   - dem_local
   - s1
 
-n_classes: 3
-batch_size: 1
+n_classes: 2
+batch_size: 16
 lr: 0.001
-lr_decay: 1
-epochs: 200
-num_workers: 0
-scalar_freq: 2
-img_freq: 2
-temp_encoding: ltae
+lr_decay: 0.9
+epochs: 20
+num_workers: 2
+scalar_freq: 64
+img_freq: 32
+temp_encoding: lstm
 
 hydroatlas_keys:
   - aet_mm_uyr

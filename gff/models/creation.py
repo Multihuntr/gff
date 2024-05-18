@@ -66,6 +66,7 @@ def create(C):
             n_predict=C["n_classes"],
             weather_window_size=C["weather_window"],
             context_embed_output_dim=C["context_embed_output_dim"],
+            temp_encoding=C["temp_encoding"]
         )
     else:
         raise NotImplementedError("Not a valid model name")

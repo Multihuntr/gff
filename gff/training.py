@@ -170,7 +170,7 @@ def val_epoch(model, dataloader, criterion, n_classes, limit: int = None):
 
 
 def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=None):
-    assert C["n_classes"] in [2, 3], "Num classes must be 2 (no-water/) or 3 (bg/perm.water/flood)"
+    assert C["n_classes"] in [2, 3], "Num classes must be 2 (bg/water) or 3 (bg/perm.water/flood)"
 
     optim = torch.optim.AdamW(model.parameters(), lr=C["lr"])
     scheduler = torch.optim.lr_scheduler.MultiplicativeLR(optim, lambda epoch: C["lr_decay"])

@@ -46,7 +46,7 @@ def main(args):
     # Prepare data loaders
     g = torch.Generator()
     g.manual_seed(C["seed"])
-    train_dl, val_dl, test_dl = gff.dataloaders.create(C, g)
+    train_dl, val_dl, test_dl = gff.dataloaders.create_all(C, g)
 
     # Train the model
     model_folder = Path("runs") / f'{C["name"]}_{datetime.datetime.now().isoformat()}'
@@ -56,7 +56,12 @@ def main(args):
     gff.training.training_loop(C, model_folder, model, (train_dl, val_dl))
 
     # Evaluate the model
-    eval_results = gff.evaluation.evaluate_model(model, test_dl)
+    out_path = gff.evaluation.model_inference(model_folder, model, test_dl)
+    tst_fnames = test_dl.dataset.meta_fnames
+    targ_path = Path(C["data_folder"]).expanduser() / "rois"
+    eval_results = gff.evaluation.evaluate_floodmaps(
+        tst_fnames, out_path, targ_path, C["num_classes"]
+    )
     with open(model_folder / "eval_results.yml", "w") as f:
         yaml.safe_dump(eval_results, f)
 

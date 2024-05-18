@@ -122,6 +122,8 @@ def mk_pixel_overlap_mask(geom, bounds):
 
 
 def convert_crs(shp: Union[shapely.Geometry, np.ndarray], _from: str, _to: str):
+    if _from == _to:
+        return shp
     project = pyproj.Transformer.from_crs(_from, _to, always_xy=True).transform
     if isinstance(shp, shapely.Geometry):
         return shapely.ops.transform(project, shp)
@@ -414,6 +416,14 @@ def get_valid_date_range(era5_folder, era5L_folder, all_fnames, weather_window: 
     start = max([era5_start, era5L_start, fname_start])
     end = min([era5_end, era5L_end, fname_end])
     return start, end
+
+
+def flatten_classes(tile: np.ndarray, n_classes: int):
+    tile[tile > 2] = -100  # This index will be ignored
+    if n_classes == 2:
+        # Flatten "flooded"/"permanent water" to just "water"
+        tile[tile == 2] = 1
+    return tile
 
 
 # UNTESTED. Don't use.

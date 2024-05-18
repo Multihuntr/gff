@@ -143,10 +143,7 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         context_res = (gff.constants.CONTEXT_RESOLUTION,) * 2
 
         targ = gff.util.get_tile(floodmap_path, geom.bounds, align=True).astype(np.int64)
-        targ[targ > 2] = -100  # This index will be ignored
-        if self.C["n_classes"] == 2:
-            # Flatten target labels to just no-water/water
-            targ[targ == 2] = 1
+        targ = gff.util.flatten_classes(targ, self.C["n_classes"])
         result = {
             "floodmap": targ,
             "continent": continent,
@@ -281,7 +278,7 @@ def read_partitions(folder: Path, fold: int):
     return train_fnames, val_fnames, test_fnames
 
 
-def create(C, generator):
+def create_all(C, generator):
     data_folder = Path(C["data_folder"]).expanduser()
     if C["dataset"] == "debug_dataset":
         train_ds = DebugFloodForecastDataset(data_folder, C)
@@ -307,3 +304,19 @@ def create(C, generator):
     test_dl = torch.utils.data.DataLoader(test_ds, **kwargs, collate_fn=sometimes_things_are_lists)
 
     return train_dl, val_dl, test_dl
+
+
+def create_test(C):
+    data_folder = Path(C["data_folder"]).expanduser()
+    if C["dataset"] == "debug_dataset":
+        test_ds = DebugFloodForecastDataset(data_folder, C)
+    elif C["dataset"] == "forecast_dataset":
+        _, _, test_fnames = read_partitions(data_folder, C["fold"])
+        test_ds = FloodForecastDataset(data_folder, C, meta_fnames=test_fnames)
+    else:
+        raise NotImplementedError(f"Dataset {C['dataset']} not supported")
+
+    kwargs = {k: C[k] for k in ["batch_size", "num_workers"]}
+    test_dl = torch.utils.data.DataLoader(test_ds, **kwargs, collate_fn=sometimes_things_are_lists)
+
+    return test_dl

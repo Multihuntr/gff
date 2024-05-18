@@ -225,6 +225,11 @@ class FloodForecastDataset(torch.utils.data.Dataset):
             data = gff.util.get_tile(fpath, geom.bounds, align=True)
             result["dem_local"] = np.array(data, dtype=np.float32)
             result["fpaths"]["dem_local"] = fpath
+        if "hand" in self.C["data_sources"]:
+            fpath = floodmap_path.with_name(floodmap_path.stem + "-hand.tif")
+            data = gff.util.get_tile(fpath, geom.bounds, align=True)
+            result["hand"] = np.array(data, dtype=np.float32)
+            result["fpaths"]["hand"] = fpath
 
         # Sentinel 1 (assumed to be a proxy for soil moisture)
         if "s1" in self.C["data_sources"]:

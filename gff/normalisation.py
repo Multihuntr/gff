@@ -28,6 +28,10 @@ def get_dem_norm(folder: Path, fold: int):
     return pandas.read_csv(folder / "normalisation" / f"dem_norm_{fold}.csv", dtype=_dtypes)
 
 
+def get_hand_norm(folder: Path, fold: int):
+    return pandas.read_csv(folder / "normalisation" / f"hand_norm_{fold}.csv", dtype=_dtypes)
+
+
 def get_s1_norm(folder: Path, fold: int):
     return pandas.read_csv(folder / "normalisation" / f"s1_norm_{fold}.csv", dtype=_dtypes)
 

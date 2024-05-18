@@ -21,6 +21,32 @@ def parse_args(argv):
     return parser.parse_args(argv)
 
 
+def export_resample_by_fnc(
+    data_path, out_fpath, fnc, spatial_profile, visit_tiles, max_error=0.5, overwrite=False
+):
+    # Export a upsampled to match floodmap
+    profile = {
+        **gff.constants.S1_PROFILE_DEFAULTS,
+        "MAX_Z_ERROR": max_error,
+        **spatial_profile,
+        "count": 1,
+    }
+    if overwrite and out_fpath.exists():
+        return
+    with rasterio.open(out_fpath, "w", **profile) as tif:
+        for tile in tqdm.tqdm(np.array(visit_tiles.geometry), "Tiles", leave=False):
+            data = fnc(tile, visit_tiles.crs, data_path)
+            tile_4326 = gff.util.convert_crs(tile, visit_tiles.crs, "EPSG:4326")
+            resampled = gff.util.resample_xr(
+                data,
+                tile_4326.bounds,
+                (gff.constants.LOCAL_RESOLUTION,) * 2,
+                method="linear",
+            ).band_data.values
+            window = gff.util.shapely_bounds_to_rasterio_window(tile.bounds, tif.transform)
+            tif.write(resampled, window=window)
+
+
 def main(args):
     meta_paths = list((args.data_path / "rois").glob("*-meta.json"))
     for meta_path in tqdm.tqdm(meta_paths, "Files"):
@@ -75,28 +101,17 @@ def main(args):
                 visit_tiles = visit_tiles.drop(tiles_to_remove)
                 visit_tiles.to_file(v_path)
 
-        # Export local DEM upsampled to match floodmap
         dem_fpath = floodmap_path.with_name(floodmap_path.stem + "-dem-local.tif")
-        dem_profile = {
-            **gff.constants.S1_PROFILE_DEFAULTS,
-            **spatial_profile,
-            "count": 1,
-        }
-        if not dem_fpath.exists():
-            with rasterio.open(dem_fpath, "w", **dem_profile) as dem_tif:
-                for tile in tqdm.tqdm(np.array(visit_tiles.geometry), "DEM Tiles", leave=False):
-                    dem_data = gff.data_sources.get_dem(tile, visit_tiles.crs, args.data_path)
-                    tile_4326 = gff.util.convert_crs(tile, visit_tiles.crs, "EPSG:4326")
-                    dem_data = gff.util.resample_xr(
-                        dem_data,
-                        tile_4326.bounds,
-                        (gff.constants.LOCAL_RESOLUTION,) * 2,
-                        method="linear",
-                    ).band_data.values
-                    window = gff.util.shapely_bounds_to_rasterio_window(
-                        tile.bounds, dem_tif.transform
-                    )
-                    dem_tif.write(dem_data, window=window)
+        fnc = gff.data_sources.get_dem
+        export_resample_by_fnc(
+            args.data_path, dem_fpath, fnc, spatial_profile, visit_tiles, max_error=0.5
+        )
+
+        hand_fpath = floodmap_path.with_name(floodmap_path.stem + "-hand.tif")
+        fnc = gff.data_sources.get_hand
+        export_resample_by_fnc(
+            args.data_path, hand_fpath, fnc, spatial_profile, visit_tiles, max_error=0.5
+        )
 
 
 if __name__ == "__main__":

@@ -33,6 +33,12 @@ def get_norms(C):
         dem_std = torch.tensor(dem_norm["std"].values).reshape((1, -1, 1, 1))
         norms["dem"] = (dem_mean, dem_std)
 
+    if "hand" in C["data_sources"]:
+        hand_norm = gff.normalisation.get_hand_norm(data_folder, fold=C["fold"])
+        hand_mean = torch.tensor(hand_norm["mean"].values).reshape((1, -1, 1, 1))
+        hand_std = torch.tensor(hand_norm["std"].values).reshape((1, -1, 1, 1))
+        norms["hand"] = (hand_mean, hand_std)
+
     if "s1" in C["data_sources"]:
         s1_norm = gff.normalisation.get_s1_norm(data_folder, fold=C["fold"])
         s1_mean = torch.tensor(s1_norm["mean"].values).reshape((1, -1, 1, 1))
@@ -66,7 +72,7 @@ def create(C):
             n_predict=C["n_classes"],
             weather_window_size=C["weather_window"],
             context_embed_output_dim=C["context_embed_output_dim"],
-            temp_encoding=C["temp_encoding"]
+            temp_encoding=C["temp_encoding"],
         )
     else:
         raise NotImplementedError("Not a valid model name")

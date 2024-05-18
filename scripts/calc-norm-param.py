@@ -85,6 +85,9 @@ def get_stats_s1_dem(folder: Path):
     dem_sums = []
     dem_sum_sqrs = []
     dem_counts = []
+    hand_sums = []
+    hand_sum_sqrs = []
+    hand_counts = []
     test_fnames = []
     for i in range(gff.constants.N_PARTITIONS):
         s1_sums.append(np.zeros(n_bands, dtype=np.float64))
@@ -93,6 +96,9 @@ def get_stats_s1_dem(folder: Path):
         dem_sums.append(np.zeros(1, dtype=np.float64))
         dem_sum_sqrs.append(np.zeros(1, dtype=np.float128))
         dem_counts.append(np.zeros(1, dtype=np.int64))
+        hand_sums.append(np.zeros(1, dtype=np.float64))
+        hand_sum_sqrs.append(np.zeros(1, dtype=np.float128))
+        hand_counts.append(np.zeros(1, dtype=np.int64))
         fpath = folder / "partitions" / f"floodmap_partition_{i}.txt"
         test_fnames.append(pandas.read_csv(fpath, header=None)[0].values.tolist())
 
@@ -115,6 +121,8 @@ def get_stats_s1_dem(folder: Path):
         fmap_path = meta_fpath.parent / Path(meta["floodmap"])
         dem_path = fmap_path.with_name(fmap_path.stem + "-dem-local.tif")
         dem_tif = rasterio.open(dem_path)
+        hand_path = fmap_path.with_name(fmap_path.stem + "-hand.tif")
+        hand_tif = rasterio.open(hand_path)
         for i, tile_row in tqdm.tqdm(
             visit_tiles.iterrows(), desc="Tiles", total=len(visit_tiles), leave=False
         ):
@@ -132,6 +140,11 @@ def get_stats_s1_dem(folder: Path):
             dem_sum_sqred = np.nansum(dem**2)
             dem_counted = (~np.isnan(dem)).sum()
 
+            hand = gff.util.get_tile(hand_tif, tile_row.geometry.bounds, align=True)
+            hand_summed = np.nansum(hand)
+            hand_sum_sqred = np.nansum(hand**2)
+            hand_counted = (~np.isnan(hand)).sum()
+
             for idx in incl_partition:
                 s1_sums[idx] += s1_summed
                 s1_sum_sqrs[idx] += s1_sum_sqred
@@ -139,16 +152,22 @@ def get_stats_s1_dem(folder: Path):
                 dem_sums[idx] += dem_summed
                 dem_sum_sqrs[idx] += dem_sum_sqred
                 dem_counts[idx] += dem_counted
+                hand_sums[idx] += hand_summed
+                hand_sum_sqrs[idx] += hand_sum_sqred
+                hand_counts[idx] += hand_counted
 
     s1_means, s1_stds = [], []
     dem_means, dem_stds = [], []
+    hand_means, hand_stds = [], []
     for i in range(gff.constants.N_PARTITIONS):
         s1_means.append(s1_sums[i] / s1_counts[i])
         s1_stds.append(np.sqrt(s1_sum_sqrs[i] / s1_counts[i] - s1_means[i] ** 2))
         dem_means.append(dem_sums[i] / dem_counts[i])
         dem_stds.append(np.sqrt(dem_sum_sqrs[i] / dem_counts[i] - dem_means[i] ** 2))
+        hand_means.append(hand_sums[i] / hand_counts[i])
+        hand_stds.append(np.sqrt(hand_sum_sqrs[i] / hand_counts[i] - hand_means[i] ** 2))
 
-    return s1_means, s1_stds, dem_means, dem_stds
+    return s1_means, s1_stds, dem_means, dem_stds, hand_means, hand_stds
 
 
 def main(args):
@@ -176,7 +195,7 @@ def main(args):
         args.data_path, "hydroatlas_norm.csv", hydroatlas_bands, hydroatlas_mean, hydroatlas_std
     )
 
-    s1_mean, s1_std, dem_mean, dem_std = get_stats_s1_dem(args.data_path)
+    s1_mean, s1_std, dem_mean, dem_std, hand_mean, hand_std = get_stats_s1_dem(args.data_path)
 
     for x in range(gff.constants.N_PARTITIONS):
         gff.normalisation.save(
@@ -184,6 +203,9 @@ def main(args):
         )
         gff.normalisation.save(
             args.data_path, f"dem_norm_{x}.csv", ["dem"], dem_mean[x], dem_std[x]
+        )
+        gff.normalisation.save(
+            args.data_path, f"hand_norm_{x}.csv", ["hand"], hand_mean[x], hand_std[x]
         )
 
 

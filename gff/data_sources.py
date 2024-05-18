@@ -163,6 +163,23 @@ def get_world_cover_file(north: int, east: int, folder: Path):
     return fpath
 
 
+def get_hand_file(north: int, east: int, folder: Path):
+    north_str, east_str = degrees_to_north_east(north, east)
+    base_url = "https://glo-30-hand.s3.amazonaws.com/v1/2021"
+    fname = f"Copernicus_DSM_COG_10_{north_str}_00_{east_str}_00_HAND.tif"
+
+    hand_folder = folder / "dem" / "HAND"
+    final_fpath = hand_folder / f"{fname}"
+    if final_fpath.exists():
+        return final_fpath
+
+    bin_data = download_url(f"{base_url}/{fname}")
+    hand_folder.mkdir(exist_ok=True)
+    with open(final_fpath, "wb") as f:
+        f.write(bin_data)
+    return final_fpath
+
+
 def get_nbyn_product(shp, shp_crs, folder, getter, n=1, preprocess=None, **kwargs):
     """
     Get a product tiled with n-by-n degree squares.
@@ -193,6 +210,10 @@ def get_world_cover(shp, shp_crs, folder):
 
 def _drop_last_pixel(ds):
     return ds.isel(x=slice(len(ds.x) - 1), y=slice(len(ds.y) - 1))
+
+
+def get_hand(shp, shp_crs, folder):
+    return get_nbyn_product(shp, shp_crs, folder, get_hand_file, n=1)
 
 
 def get_dem(shp, shp_crs, folder, name="COP-DEM_GLO-30-DTED__2023_1"):

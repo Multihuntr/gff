@@ -26,7 +26,8 @@ def center_in(in_dim, out_dim):
     model = nn.Sequential(
         nn.Conv3d(in_dim, out_dim, kernel_size=3, stride=1, padding=1),
         nn.BatchNorm3d(out_dim),
-        nn.LeakyReLU(inplace=True))
+        nn.LeakyReLU(inplace=True),
+    )
     return model
 
 
@@ -35,7 +36,8 @@ def center_out(in_dim, out_dim):
         nn.Conv3d(in_dim, in_dim, kernel_size=3, stride=1, padding=1),
         nn.BatchNorm3d(in_dim),
         nn.LeakyReLU(inplace=True),
-        nn.ConvTranspose3d(in_dim, out_dim, kernel_size=3, stride=2, padding=1, output_padding=1))
+        nn.ConvTranspose3d(in_dim, out_dim, kernel_size=3, stride=2, padding=1, output_padding=1),
+    )
     return model
 
 

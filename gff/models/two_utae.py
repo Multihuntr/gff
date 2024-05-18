@@ -104,11 +104,7 @@ class TwoUTAE(nn.Module):
             local_input_dim += 1
         if self.w_s1:
             local_input_dim += 2
-            self.lead_m = 3
-            self.lead_n = 5  # see self.get_lead_time_idx for details
-            self.len_lead = (
-                weather_window_size + self.lead_m * weather_window_size // self.lead_n + 1
-            )
+            self.len_lead = weather_window_size + 1
             self.lead_time_embedding = nn.Embedding(self.len_lead, lead_time_dim)
         self.local_embed = utae.UTAE(
             local_input_dim,
@@ -133,18 +129,12 @@ class TwoUTAE(nn.Module):
 
     def get_lead_time_idx(self, lead):
         # Get the index into the embedding based on lead.
-        # For normal FiLM conditioning, lead == idx, but here we're encoding an unbounded value.
-        # So, we apply a simple remapping scheme for values outside the weather window.
-        # 1. For lead times within the weather window size, lead == idx
+        # For lead times within the weather window size, lead == idx
         lead_copy = lead.clone()
-        # 2. For lead times outside the weather window, we chunk by self.lead_n days
-        outside_window = lead > self.weather_window_size
-        chunked_idx = (lead[outside_window] - self.weather_window_size) // self.lead_n
-        lead_copy[outside_window] = chunked_idx + self.weather_window_size
-        # 3. For leads too far away in time (lead_m * window size) we just set it to the last idx
+        # For leads too far away in time we just set it to the last idx
         # This allows the model to know how to use soil moisture in the S1 images,
         # regardless of how old. e.g. the model can ignore it if it wants.
-        lead_copy[lead > (self.lead_m * self.weather_window_size)] = self.len_lead - 1
+        lead_copy[lead > self.len_lead] = self.len_lead - 1
         return lead_copy
 
     def forward(self, ex):

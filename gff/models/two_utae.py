@@ -23,6 +23,7 @@ def get_empty_norms(era5_bands: int, era5l_bands: int, hydroatlas_bands: int):
             torch.ones((1, hydroatlas_bands, 1, 1)),
         ),
         "dem": (torch.zeros((1, 1, 1, 1)), torch.ones((1, 1, 1, 1))),
+        "hand": (torch.zeros((1, 1, 1, 1)), torch.ones((1, 1, 1, 1))),
         "s1": (torch.zeros((1, 2, 1, 1)), torch.ones((1, 2, 1, 1))),
     }
 
@@ -71,8 +72,8 @@ class TwoUTAE(nn.Module):
             self.register_buffer(f"{key}_std", std)
 
         assert (
-            self.w_s1 or self.w_dem_local
-        ), "Must provide either s1 or dem local to produce local scale predictions"
+            self.w_s1 or self.w_dem_local or self.w_hand
+        ), "Must provide one of s1, dem local or hand to produce local scale predictions"
         assert (self.w_s1 and (lead_time_dim is not None)) or (
             (not self.w_s1) and (lead_time_dim is None)
         ), "If you provide s1, you must also provide lead_time_dim. If not, you shouldn't."
@@ -226,6 +227,7 @@ if __name__ == "__main__":
         "dem_context": torch.randn((B, 1, cH, cW)).cuda(),
         "s1": torch.randn(B, 2, fH, fW).cuda(),
         "dem_local": torch.randn((B, 1, fH, fW)).cuda(),
+        "hand": torch.randn((B, 1, fH, fW)).cuda(),
         "s1_lead_days": torch.randint(0, 20, (B,)).cuda(),
     }
     era5_bands = list(range(n_era5))

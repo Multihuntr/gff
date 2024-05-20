@@ -213,8 +213,6 @@ def main(args):
             out_tif.descriptions = era5L_keys
             out_tif.scales = (1,) * len(era5L_keys)
             out_tif.offsets = (0,) * len(era5L_keys)
-            # TODO: Volumetric total precipitation, snowdepth water equivalent, potential evaporation sum are all 0
-            # TODO: Surface Net solar and Thermal, surface pressure span the whole int16 range
             out_tif.write(np.concatenate(era5L_data, axis=0))
 
     ref_era5l_tif.close()

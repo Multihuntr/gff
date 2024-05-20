@@ -88,9 +88,11 @@ class CustomWriter:
             local_rasters.append(r)
         self.writer.add_images("local", np.stack(local_rasters), self.count)
 
-    def write_scalars(self, loss: float, f1: float):
+    def write_scalars(self, loss: float, avg_f1: float, f1s: list[float]):
         self.writer.add_scalar("Loss/train_batch", loss, self.count)
-        self.writer.add_scalar("F1/train_batch", f1, self.count)
+        for i, f1 in enumerate(f1s):
+            self.writer.add_scalar(f"F1/train_batch_{i}", f1, self.count)
+        self.writer.add_scalar("F1/train_batch", avg_f1, self.count)
 
 
 def train_epoch(
@@ -105,10 +107,10 @@ def train_epoch(
 ):
     model.train()
     f1_all = torchmetrics.classification.MulticlassF1Score(
-        n_classes, average="macro", ignore_index=-100
+        n_classes, average="none", ignore_index=-100
     )
     f1_prog = torchmetrics.classification.MulticlassF1Score(
-        n_classes, average="macro", ignore_index=-100
+        n_classes, average="none", ignore_index=-100
     )
     loss_all = torchmetrics.MeanMetric()
     loss_prog = torchmetrics.MeanMetric()
@@ -116,7 +118,8 @@ def train_epoch(
     device = next(model.parameters()).device
     for thing in [f1_all, f1_prog, loss_all, loss_prog, criterion]:
         thing.to(device)
-    for i, example_cpu in enumerate(tqdm.tqdm(dataloader, desc="Training", leave=False)):
+    pbar = tqdm.tqdm(dataloader, desc="Training", leave=False)
+    for i, example_cpu in enumerate(pbar):
         example = gff.util.recursive_todevice(example_cpu, device)
         targ = example.pop("floodmap")
         pred = model(example)
@@ -126,20 +129,22 @@ def train_epoch(
         loss.backward()
         optim.step()
 
-        f1_all(pred, targ[:, 0])
-        f1_prog(pred, targ[:, 0])
-        loss_all(loss)
-        loss_prog(loss)
+        f1_all.update(pred, targ[:, 0])
+        f1_prog.update(pred, targ[:, 0])
+        loss_all.update(loss)
+        loss_prog.update(loss)
         if (i % scalar_freq) == 0 and i != 0:
-            this_loss = loss_prog.compute().cpu().item()
-            this_f1 = f1_prog.compute().cpu().item()
-            custom_writer.write_scalars(this_loss, this_f1)
+            this_loss = loss_prog.compute().cpu()
+            this_f1 = f1_prog.compute().cpu().numpy().tolist()
+            avg_f1 = sum(this_f1) / len(this_f1)
+            custom_writer.write_scalars(this_loss, avg_f1, this_f1)
             loss_prog.reset()
             f1_prog.reset()
+            pbar.set_description(f"Training [{avg_f1:4.2f}]")
         if (i % img_freq) == 0 and i != 0:
             custom_writer.write_imgs(example_cpu, pred.detach().cpu(), targ.detach().cpu())
         custom_writer.step()
-    return loss_all.compute().cpu().item(), f1_all.compute().cpu().item()
+    return loss_all.compute().cpu().item(), f1_all.compute().cpu().numpy().tolist()
 
 
 def val_epoch(model, dataloader, criterion, n_classes, limit: int = None):
@@ -147,7 +152,7 @@ def val_epoch(model, dataloader, criterion, n_classes, limit: int = None):
     with torch.no_grad():
         device = next(model.parameters()).device
         f1 = torchmetrics.classification.MulticlassF1Score(
-            n_classes, average="macro", ignore_index=-100
+            n_classes, average="none", ignore_index=-100
         )
         f1.to(device)
         loss_all = torchmetrics.MeanMetric()
@@ -166,7 +171,7 @@ def val_epoch(model, dataloader, criterion, n_classes, limit: int = None):
             loss_all(loss)
             if limit is not None and i >= limit:
                 break
-    return loss_all.compute().cpu().item(), f1.compute().cpu().item()
+    return loss_all.compute().cpu().item(), f1.compute().cpu().numpy().tolist()
 
 
 def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=None):
@@ -180,7 +185,7 @@ def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=Non
         optim.load_state_dict(checkpoint["optim"])
         scheduler.load_state_dict(checkpoint["scheduler"])
         start_epoch = checkpoint["epoch"]
-    cls_weight = torch.tensor([0.5, 2, 2])[: C["n_classes"]]
+    cls_weight = torch.tensor(C.get("class_weights", (1.0,) * 3))[: C["n_classes"]]
     criterion = nn.CrossEntropyLoss(weight=cls_weight, ignore_index=-100)
 
     writer = torch.utils.tensorboard.SummaryWriter(model_folder)
@@ -200,9 +205,10 @@ def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=Non
     train_dl, val_dl = dataloaders
     hoisted_epoch = start_epoch
     try:
-        for epoch in tqdm.tqdm(range(start_epoch, C["epochs"]), desc="Training epochs"):
+        pbar = tqdm.tqdm(range(start_epoch, C["epochs"]), desc="Epochs")
+        for epoch in pbar:
             hoisted_epoch = epoch
-            train_loss, train_f1 = train_epoch(
+            train_loss, train_f1s = train_epoch(
                 model,
                 train_dl,
                 criterion,
@@ -212,12 +218,18 @@ def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=Non
                 scalar_freq=C["scalar_freq"],
                 img_freq=C["img_freq"],
             )
-            val_loss, val_f1 = val_epoch(model, val_dl, criterion, C["n_classes"], limit=256)
+            val_loss, val_f1s = val_epoch(model, val_dl, criterion, C["n_classes"], limit=256)
 
             writer.add_scalar("Loss/train_epoch", train_loss, custom_writer.count)
-            writer.add_scalar("F1/train_epoch", train_f1, custom_writer.count)
             writer.add_scalar("Loss/val", val_loss, custom_writer.count)
+            for i in range(C["n_classes"]):
+                writer.add_scalar(f"F1/train_epoch_{i}", train_f1s[i], custom_writer.count)
+                writer.add_scalar(f"F1/val_{i}", val_f1s[i], custom_writer.count)
+            train_f1 = sum(train_f1s) / len(train_f1s)
+            val_f1 = sum(val_f1s) / len(val_f1s)
+            writer.add_scalar("F1/train_epoch", train_f1, custom_writer.count)
             writer.add_scalar("F1/val", val_f1, custom_writer.count)
+            pbar.set_description(f"Epochs [val F1: {val_f1:4.2f}]")
 
             scheduler.step()
     finally:

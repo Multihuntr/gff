@@ -1,10 +1,10 @@
 seed: 6426452
 data_folder: ~/NFS_era5/gff
+device: cuda:0
 
 name: debug_everything
 
 model: debug_model
-device: cuda:0
 
 dataset: debug_dataset
 checkerboard: True

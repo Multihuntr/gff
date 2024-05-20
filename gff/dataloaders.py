@@ -52,6 +52,9 @@ class DebugFloodForecastDataset(torch.utils.data.Dataset):
         if "dem_local" in C["data_sources"]:
             self.dem_local = np.random.randn(self.n_examples, 1, 224, 224)
             self.dem_local = self.dem_local.astype(np.float32)
+        if "hand" in C["data_sources"]:
+            self.hand = np.random.randn(self.n_examples, 1, 224, 224)
+            self.hand = self.hand.astype(np.float32)
         if "s1" in C["data_sources"]:
             self.s1 = np.random.randn(self.n_examples, 2, 224, 224)
             self.s1 = self.s1.astype(np.float32)

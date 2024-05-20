@@ -15,6 +15,7 @@ data_sources:
   - era5_land
   - hydroatlas_basin
   - dem_context
+  - dem_local
   - hand
   - s1
 

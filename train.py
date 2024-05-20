@@ -60,7 +60,7 @@ def main(args):
     tst_fnames = test_dl.dataset.meta_fnames
     targ_path = Path(C["data_folder"]).expanduser() / "rois"
     eval_results = gff.evaluation.evaluate_floodmaps(
-        tst_fnames, out_path, targ_path, C["num_classes"]
+        tst_fnames, out_path, targ_path, C["n_classes"]
     )
     with open(model_folder / "eval_results.yml", "w") as f:
         yaml.safe_dump(eval_results, f)

@@ -701,7 +701,8 @@ class MetNet3(Module):
         _locals.pop('hrrr_norm_statistics', None)
         self._configs = pickle.dumps(_locals)
 
-        # self.input_2496_shape = (input_2496_channels, input_spatial_size, input_spatial_size)
+        if lead_time_embed_dim is None:
+            lead_time_embed_dim = 1
         self.lead_time_embed_dim = lead_time_embed_dim
         self.resnet_blocks_down_4km = ResnetBlocks(
             dim = dim,

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 # from . import utae, metnet
 import gff.models.utae as utae
@@ -59,8 +60,10 @@ class ModelBackbones(nn.Module):
         w_hand=True,
         w_s1=True,
         n_predict=3,
-        weather_window_size=20,
-        context_embed_output_dim=3,
+        weather_window_size=20,        
+        context_embed_output_dim=5,
+        center_crop_context=True,
+        average_context=True,
         temp_encoding="ltae",
         model_name="UTAE",
     ):
@@ -75,6 +78,8 @@ class ModelBackbones(nn.Module):
         self.w_s1 = w_s1
         self.n_predict = n_predict
         self.weather_window_size = weather_window_size
+        self.center_crop_context = center_crop_context
+        self.average_context = average_context
         self.temp_encoding = temp_encoding
 
         # Store normalisation info on model
@@ -111,7 +116,8 @@ class ModelBackbones(nn.Module):
                 context_embed_input_dim,
                 encoder_widths=[32, 32],
                 decoder_widths=[32, 32],
-                out_conv=[context_embed_output_dim],
+                out_conv=[context_embed_output_dim],            
+                cond_dim=lead_time_dim,
                 temp_encoding=self.temp_encoding,
             )
         elif model_name == "two_metnet":
@@ -203,6 +209,13 @@ class ModelBackbones(nn.Module):
         dem_local_inp = nans_to_zero(dem_local_inp)
         hand_inp = nans_to_zero(hand_inp)
 
+        # Get Lead time embedding indexes
+        if self.w_s1:
+            lead_idx = self.get_lead_time_idx(ex["s1_lead_days"])
+            lead = self.lead_time_embedding(lead_idx)
+        else:
+            lead = None
+
         # Process context inputs
         context_statics_lst = []
         if self.w_hydroatlas_basin:
@@ -218,24 +231,23 @@ class ModelBackbones(nn.Module):
             context_inp = torch.cat([era5l_inp, era5_inp, context_statics], dim=2)
         else:
             context_inp = torch.cat([era5l_inp, era5_inp], dim=2)
-        context_embedded = self.context_embed(context_inp, batch_positions)
+        context_embedded = self.context_embed(context_inp, batch_positions, lead=lead)
         context_embedded = context_embedded[:, 0]
         
         # Select the central 2x2 pixels and average
-        ylo, yhi = cH // 2 - 1, cH // 2 + 3
-        xlo, xhi = cW // 2 - 1, cW // 2 + 3
-        context_out = context_embedded[:, :, ylo:yhi, xlo:xhi].mean(axis=(2, 3), keepdims=True)
-        context_out_repeat = context_out.repeat((1, 1, fH, fW))
-
-        # Get Lead time embedding indexes
-        if self.w_s1:
-            lead_idx = self.get_lead_time_idx(ex["s1_lead_days"])
-            lead = self.lead_time_embedding(lead_idx)
+        if self.center_crop_context:
+            ylo, yhi = cH // 2 - 1, cH // 2 + 3
+            xlo, xhi = cW // 2 - 1, cW // 2 + 3
         else:
-            lead = None
+            ylo, yhi = 0, cH
+            xlo, xhi = 0, cW
+        context_out = context_embedded[:, :, ylo:yhi, xlo:xhi]
+        if self.average_context:
+            context_out = context_out.mean(axis=(2, 3), keepdims=True)
+        context_out_upsc = F.interpolate(context_out, size=(fH, fW), mode="nearest")
 
         # Process local inputs
-        local_lst = [context_out_repeat]
+        local_lst = [context_out_upsc]
         if self.w_s1:
             local_lst.append(s1_inp)
         if self.w_dem_local:
@@ -260,7 +272,7 @@ if __name__ == "__main__":
     n_era5 = 16
     n_era5_land = 8
     lead_time_dim = 16
-    model_name = "two_utae" # "two_utae"#
+    model_name = "two_metnet" # "two_utae"#
     ex = {
         "era5": torch.randn((B, T, n_era5, cH, cW)).cuda(),
         "era5_land": torch.randn((B, T, n_era5_land, cH, cW)).cuda(),
@@ -334,6 +346,29 @@ if __name__ == "__main__":
         model_name=model_name
     )
     model5 = model5.cuda()
+    model6 = ModelBackbones(
+        era5_bands,
+        era5l_bands,
+        lead_time_dim=lead_time_dim,
+        w_hydroatlas_basin=False,
+        w_dem_context=False,
+        w_dem_local=False,
+        average_context=False,
+        model_name=model_name
+    )
+    model6 = model6.cuda()
+    model7 = ModelBackbones(
+        era5_bands,
+        era5l_bands,
+        lead_time_dim=lead_time_dim,
+        w_hydroatlas_basin=False,
+        w_dem_context=False,
+        w_dem_local=False,
+        center_crop_context=False,
+        average_context=False,
+        model_name=model_name
+    )
+    model7 = model7.cuda()
     print("Model")
     out = model(ex)
     # Only hydroatlas will cause problems if provided after saying we wouldn't
@@ -348,4 +383,8 @@ if __name__ == "__main__":
     out = model4(ex)
     print("Model 5")
     out = model5(ex)
+    print("Model 6")
+    out = model6(ex)
+    print("Model 7")
+    out = model7(ex)
     print(out.shape)

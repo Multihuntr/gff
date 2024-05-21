@@ -288,6 +288,7 @@ class Two3DUNet(nn.Module):
         self.context_embed = unet3d.UNet3D(
             input_dim=context_embed_input_dim,
             out_conv=context_embed_output_dim,
+            cond_dim=lead_time_dim,
             op_type='3d',
         )
 
@@ -355,6 +356,13 @@ class Two3DUNet(nn.Module):
         dem_local_inp = nans_to_zero(dem_local_inp)
         hand_inp = nans_to_zero(hand_inp)
 
+        # Get Lead time embedding indexes
+        if self.w_s1:
+            lead_idx = self.get_lead_time_idx(ex["s1_lead_days"])
+            lead = self.lead_time_embedding(lead_idx)
+        else:
+            lead = None
+
         # Process context inputs
         context_statics_lst = []
         if self.w_hydroatlas_basin:
@@ -370,7 +378,7 @@ class Two3DUNet(nn.Module):
             context_inp = torch.cat([era5l_inp, era5_inp, context_statics], dim=2)
         else:
             context_inp = torch.cat([era5l_inp, era5_inp], dim=2)
-        context_embedded = self.context_embed(context_inp)
+        context_embedded = self.context_embed(context_inp, lead=lead)
 
         # Select the central 2x2 pixels and average
         if self.center_crop_context:
@@ -384,13 +392,6 @@ class Two3DUNet(nn.Module):
             context_out = context_out.mean(axis=(2, 3), keepdims=True)
         context_out_upsc = F.interpolate(context_out, size=(fH, fW), mode="nearest")
 
-        # Get Lead time embedding indexes
-        if self.w_s1:
-            lead_idx = self.get_lead_time_idx(ex["s1_lead_days"])
-            lead = self.lead_time_embedding(lead_idx)
-        else:
-            lead = None
-
         # Process local inputs
         local_lst = [context_out_upsc]
         if self.w_s1:
@@ -403,7 +404,6 @@ class Two3DUNet(nn.Module):
         # Pretend it's temporal data with one time step for utae
         local_inp = local_inp[:, None]
         out = self.local_embed(local_inp, lead=lead)
-        out = out[:, 0]
         return out
 
 
@@ -488,7 +488,7 @@ if __name__ == "__main__":
         average_context=False,
     )
     model6 = model6.cuda()
-    model7 = TwoUTAE(
+    model7 = Two3DUNet(
         era5_bands,
         era5l_bands,
         lead_time_dim=lead_time_dim,

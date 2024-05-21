@@ -339,14 +339,20 @@ def seed_packages(seed):
 
 def pair(str):
     """For commandline argument parsing"""
-    k, v = str.split("|")
+    k, v = str.split("=")
     if v.isdigit():
         v = int(v)
+        # TODO: parse as yml for datatypes, maybe?
+    elif v == "True" or v == "true":
+        v = True
+    elif v == "False" or v == "false":
+        v = False
     else:
         try:
             v = float(v)
         except ValueError:
             pass
+
     return k, v
 
 

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 # from . import utae
 import gff.models.utae as utae
@@ -44,7 +45,9 @@ class TwoUTAE(nn.Module):
         w_s1=True,
         n_predict=3,
         weather_window_size=20,
-        context_embed_output_dim=3,
+        context_embed_output_dim=5,
+        center_crop_context=True,
+        average_context=True,
         temp_encoding="ltae",
     ):
         super().__init__()
@@ -58,6 +61,8 @@ class TwoUTAE(nn.Module):
         self.w_s1 = w_s1
         self.n_predict = n_predict
         self.weather_window_size = weather_window_size
+        self.center_crop_context = center_crop_context
+        self.average_context = average_context
         self.temp_encoding = temp_encoding
 
         # Store normalisation info on model
@@ -94,6 +99,7 @@ class TwoUTAE(nn.Module):
             encoder_widths=[32, 32],
             decoder_widths=[32, 32],
             out_conv=[context_embed_output_dim],
+            cond_dim=lead_time_dim,
             temp_encoding=self.temp_encoding,
         )
 
@@ -163,6 +169,13 @@ class TwoUTAE(nn.Module):
         dem_local_inp = nans_to_zero(dem_local_inp)
         hand_inp = nans_to_zero(hand_inp)
 
+        # Get Lead time embedding indexes
+        if self.w_s1:
+            lead_idx = self.get_lead_time_idx(ex["s1_lead_days"])
+            lead = self.lead_time_embedding(lead_idx)
+        else:
+            lead = None
+
         # Process context inputs
         context_statics_lst = []
         if self.w_hydroatlas_basin:
@@ -178,24 +191,23 @@ class TwoUTAE(nn.Module):
             context_inp = torch.cat([era5l_inp, era5_inp, context_statics], dim=2)
         else:
             context_inp = torch.cat([era5l_inp, era5_inp], dim=2)
-        context_embedded = self.context_embed(context_inp, batch_positions)
+        context_embedded = self.context_embed(context_inp, batch_positions, lead=lead)
         context_embedded = context_embedded[:, 0]
 
         # Select the central 2x2 pixels and average
-        ylo, yhi = cH // 2 - 1, cH // 2 + 3
-        xlo, xhi = cW // 2 - 1, cW // 2 + 3
-        context_out = context_embedded[:, :, ylo:yhi, xlo:xhi].mean(axis=(2, 3), keepdims=True)
-        context_out_repeat = context_out.repeat((1, 1, fH, fW))
-
-        # Get Lead time embedding indexes
-        if self.w_s1:
-            lead_idx = self.get_lead_time_idx(ex["s1_lead_days"])
-            lead = self.lead_time_embedding(lead_idx)
+        if self.center_crop_context:
+            ylo, yhi = cH // 2 - 1, cH // 2 + 3
+            xlo, xhi = cW // 2 - 1, cW // 2 + 3
         else:
-            lead = None
+            ylo, yhi = 0, cH
+            xlo, xhi = 0, cW
+        context_out = context_embedded[:, :, ylo:yhi, xlo:xhi]
+        if self.average_context:
+            context_out = context_out.mean(axis=(2, 3), keepdims=True)
+        context_out_upsc = F.interpolate(context_out, size=(fH, fW), mode="nearest")
 
         # Process local inputs
-        local_lst = [context_out_repeat]
+        local_lst = [context_out_upsc]
         if self.w_s1:
             local_lst.append(s1_inp)
         if self.w_dem_local:
@@ -239,7 +251,6 @@ if __name__ == "__main__":
         hydroatlas_bands,
         hydroatlas_dim,
         lead_time_dim,
-        temp_encoding="ltae",
     )
     model = model.cuda()
     model1 = TwoUTAE(
@@ -247,7 +258,6 @@ if __name__ == "__main__":
         era5l_bands,
         lead_time_dim=lead_time_dim,
         w_hydroatlas_basin=False,
-        temp_encoding="ltae",
     )
     model1 = model1.cuda()
     model2 = TwoUTAE(
@@ -256,7 +266,6 @@ if __name__ == "__main__":
         lead_time_dim=lead_time_dim,
         w_hydroatlas_basin=False,
         w_dem_context=False,
-        temp_encoding="ltae",
     )
     model2 = model2.cuda()
     model3 = TwoUTAE(
@@ -265,7 +274,6 @@ if __name__ == "__main__":
         lead_time_dim=lead_time_dim,
         w_hydroatlas_basin=False,
         w_dem_context=False,
-        temp_encoding="ltae",
     )
     model3 = model3.cuda()
     model4 = TwoUTAE(
@@ -274,7 +282,6 @@ if __name__ == "__main__":
         w_hydroatlas_basin=False,
         w_dem_context=False,
         w_s1=False,
-        temp_encoding="ltae",
     )
     model4 = model4.cuda()
     model5 = TwoUTAE(
@@ -284,9 +291,29 @@ if __name__ == "__main__":
         w_hydroatlas_basin=False,
         w_dem_context=False,
         w_dem_local=False,
-        temp_encoding="ltae",
     )
     model5 = model5.cuda()
+    model6 = TwoUTAE(
+        era5_bands,
+        era5l_bands,
+        lead_time_dim=lead_time_dim,
+        w_hydroatlas_basin=False,
+        w_dem_context=False,
+        w_dem_local=False,
+        average_context=False,
+    )
+    model6 = model6.cuda()
+    model7 = TwoUTAE(
+        era5_bands,
+        era5l_bands,
+        lead_time_dim=lead_time_dim,
+        w_hydroatlas_basin=False,
+        w_dem_context=False,
+        w_dem_local=False,
+        center_crop_context=False,
+        average_context=False,
+    )
+    model7 = model7.cuda()
     print("Model")
     out = model(ex)
     # Only hydroatlas will cause problems if provided after saying we wouldn't
@@ -301,4 +328,8 @@ if __name__ == "__main__":
     out = model4(ex)
     print("Model 5")
     out = model5(ex)
+    print("Model 6")
+    out = model6(ex)
+    print("Model 7")
+    out = model7(ex)
     print(out.shape)

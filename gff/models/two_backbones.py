@@ -122,7 +122,7 @@ class ModelBackbones(nn.Module):
             )
         elif model_name == "two_metnet":
             # I would normally multiply this by the time size (time batch size?)
-            options_metnet["dim_in"] = 12 * context_embed_input_dim
+            options_metnet["dim_in"] = 20 * context_embed_input_dim
             options_metnet["lead_time_embed_dim"] = lead_time_dim
             options_metnet["out_conv"] = context_embed_output_dim
             self.context_embed = metnet.MetNet3(
@@ -185,7 +185,7 @@ class ModelBackbones(nn.Module):
 
     def forward(self, ex):
         B, N, cC, cH, cW = ex["era5"].shape
-        print("to(torch.float32) was added for metnet")
+        # print("to(torch.float32) was added for metnet")
         batch_positions = torch.arange(0, N).reshape((1, N)).repeat((B, 1)).to(ex["era5"].device).to(torch.float32)
         if self.w_s1:
             example_local = ex["s1"]

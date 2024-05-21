@@ -54,11 +54,11 @@ def create(C):
 
         return debug_model.DebugModel()
     elif C["model"] == "two_utae" or C["model"] == "two_metnet":
-        from . import model_backbone
+        from . import two_backbones
 
         norms = get_norms(C)
 
-        return model_backbone.ModelBackbones(
+        return two_backbones.ModelBackbones(
             C["era5_keys"],
             C["era5_land_keys"],
             C["hydroatlas_keys"],

@@ -8,6 +8,8 @@ model: two_metnet
 hydroatlas_dim: 16
 lead_time_dim: 16
 context_embed_output_dim: 5
+center_crop_context: True
+average_context: False
 temp_encoding: ltae
 
 dataset: forecast_dataset
@@ -23,7 +25,7 @@ data_sources:
   - hand
   - s1
 
-n_classes: 2
+n_classes: 3
 batch_size: 16
 lr: 0.001
 lr_decay: 0.9

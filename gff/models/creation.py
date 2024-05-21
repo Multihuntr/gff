@@ -53,12 +53,12 @@ def create(C):
         from . import debug_model
 
         return debug_model.DebugModel()
-    elif C["model"] == "two_utae":
-        from . import two_utae
+    elif C["model"] == "two_utae" or C["model"] == "two_metnet":
+        from . import model_backbone
 
         norms = get_norms(C)
 
-        return two_utae.TwoUTAE(
+        return model_backbone.ModelBackbones(
             C["era5_keys"],
             C["era5_land_keys"],
             C["hydroatlas_keys"],
@@ -74,6 +74,7 @@ def create(C):
             weather_window_size=C["weather_window"],
             context_embed_output_dim=C["context_embed_output_dim"],
             temp_encoding=C["temp_encoding"],
+            model_name=C["model"]
         )
     else:
         raise NotImplementedError("Not a valid model name")

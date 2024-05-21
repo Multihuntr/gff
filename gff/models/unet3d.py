@@ -237,22 +237,30 @@ class CenterConvBlock3d(nn.Module):
 
 
 class UNet3D(nn.Module):
-    def __init__(self, in_channels, n_classes, feats=8, pad_value=None, zero_pad=True, cond_dim=None):
+    def __init__(
+        self, 
+        input_dim, 
+        out_conv, 
+        feats=8, 
+        pad_value=None, 
+        zero_pad=True, 
+        cond_dim=None
+    ):
         super(UNet3D, self).__init__()
-        self.in_channels = in_channels
-        self.n_classes = n_classes
+        self.input_dim = input_dim
+        self.out_conv = out_conv
         self.pad_value = pad_value
         self.zero_pad = zero_pad
 
         self.encoder1 = ConvBlock3d(
-            in_dim=in_channels, 
+            in_dim=input_dim, 
             out_dims=[feats*4,feats*4], 
             cond_dim=cond_dim,
             end_pool=True,
             skip=True
         )
         self.encoder2 = ConvBlock3d(
-            in_dim=in_channels, 
+            in_dim=feats*4, 
             out_dims=[feats*8, feats*8], 
             cond_dim=cond_dim,
             end_pool=True,
@@ -297,13 +305,13 @@ class UNet3D(nn.Module):
         )
         decoder_layers2.append(
             nn.Conv3d(
-                feats * 2, n_classes, kernel_size=3, stride=1, padding=1
+                feats * 2, out_conv, kernel_size=3, stride=1, padding=1
             )
         )
         self.decoder2 = nn.ModuleList(*decoder_layers2)
 
 
-    def forward(self, x, batch_positions=None, lead=None):
+    def forward(self, x, lead=None):
         out = x.permute(0, 2, 1, 3, 4)
         if self.pad_value is not None:
             pad_mask = (out == self.pad_value).all(dim=-1).all(dim=-1).all(dim=1)  # BxT pad mask

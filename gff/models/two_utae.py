@@ -287,6 +287,7 @@ class Two3DUNet(nn.Module):
         self.context_embed = unet3d.UNet3D(
             input_dim=context_embed_input_dim,
             out_conv=context_embed_output_dim,
+            op_type='3d',
         )
 
         # Create local embedding/prediction layers
@@ -303,6 +304,7 @@ class Two3DUNet(nn.Module):
             input_dim=local_input_dim,
             out_conv=n_predict,
             cond_dim=lead_time_dim,
+            op_type='2d',
         )
 
     def normalise(self, ex, key, suffix=None):
@@ -427,7 +429,7 @@ if __name__ == "__main__":
     era5_bands = list(range(n_era5))
     era5l_bands = list(range(n_era5_land))
     hydroatlas_bands = list(range(n_hydroatlas))
-    model = Two3DUNet(
+    model = TwoUTAE(
         era5_bands,
         era5l_bands,
         hydroatlas_bands,

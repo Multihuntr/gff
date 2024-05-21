@@ -44,15 +44,11 @@ class ConvLayer3d(nn.Module):
         scale_shift = None
         if exists(self.mlp) and exists(lead):
             lead = self.mlp(lead)
-            print('LEAD 0', lead.shape)
             lead = rearrange(lead.flatten(start_dim=1), "b c -> b c 1 1")
-            print('LEAD 1', lead.shape)
             scale_shift = lead.chunk(2, dim=1)
-        print('INPUT lay', input.shape)
 
         for _, layer in enumerate(self.conv):
             input = layer(input)
-            print(layer)
             isNormLayer = isinstance(layer, nn.BatchNorm3d)
             # apply linear transform on CONV output
             # (following a normalization, and preceding an output non-linearity)
@@ -61,18 +57,12 @@ class ConvLayer3d(nn.Module):
                 and isNormLayer
             ):
                 scale, shift = scale_shift
-                print('SCALE',scale.shape)
-                print('SHIFT',shift.shape)
-                print('INPUT', input.shape)
                 scale = scale.unsqueeze(-1)
                 shift = shift.unsqueeze(-1)
-                print('SCALE',scale.shape)
-                print('SHIFT',shift.shape)
                 replicate_each_t = int(input.shape[0] / shift.shape[0])
                 input = input * (scale.repeat(replicate_each_t, 1, 1, 1, 1) + 1) + shift.repeat(
                     replicate_each_t, 1, 1, 1, 1
                 )
-                print(input.shape)
         return input  # self.conv(input, lead)
     
 
@@ -82,20 +72,22 @@ class ConvTransposeLayer3d(nn.Module):
         in_dim,
         out_dim,
         cond_dim=None,  # lead_time_embed_dim
-        block=True,
+        op_type='3d', # 3d or 2d
     ):
         super(ConvTransposeLayer3d, self).__init__()
-
+        self.op_type=op_type
         self.mlp = None  # TODO: FiLM
 
         layers = []    
-        self.norm_then_relu = []    
-        layers.append(nn.ConvTranspose3d(in_dim, out_dim, kernel_size=3, stride=2, padding=1, output_padding=1))
-        if block:
-            layers.append(nn.BatchNorm3d(out_dim))
-            layers.append(nn.LeakyReLU(inplace=True))
-            uses_relu = True
-            self.norm_then_relu.append(uses_relu)
+        self.norm_then_relu = []  
+        if self.op_type=='3d':
+            layers.append(nn.ConvTranspose3d(in_dim, out_dim, kernel_size=3, stride=2, padding=1, output_padding=1))
+        elif self.op_type=='2d':
+            layers.append(nn.ConvTranspose2d(in_dim, out_dim, kernel_size=3, stride=2, padding=1, output_padding=1))
+        layers.append(nn.BatchNorm3d(out_dim))
+        layers.append(nn.LeakyReLU(inplace=True))
+        uses_relu = True
+        self.norm_then_relu.append(uses_relu)
         self.conv = nn.Sequential(*layers)
 
         if exists(cond_dim):
@@ -113,7 +105,11 @@ class ConvTransposeLayer3d(nn.Module):
             scale_shift = lead.chunk(2, dim=1)
 
         for _, layer in enumerate(self.conv):
-            input = layer(input)
+            if isinstance(layer, nn.ConvTranspose2d):
+                input = layer(input[:,:,0]) #B, C, T, H, W
+                input = input.unsqueeze(2)
+            else:
+                input = layer(input)            
             isNormLayer = isinstance(layer, nn.BatchNorm3d)
             # apply linear transform on CONV output
             # (following a normalization, and preceding an output non-linearity)
@@ -122,9 +118,11 @@ class ConvTransposeLayer3d(nn.Module):
                 and isNormLayer
             ):
                 scale, shift = scale_shift
+                scale = scale.unsqueeze(-1)
+                shift = shift.unsqueeze(-1)
                 replicate_each_t = int(input.shape[0] / shift.shape[0])
-                input = input * (scale.repeat(replicate_each_t, 1, 1, 1) + 1) + shift.repeat(
-                    replicate_each_t, 1, 1, 1
+                input = input * (scale.repeat(replicate_each_t, 1, 1, 1, 1) + 1) + shift.repeat(
+                    replicate_each_t, 1, 1, 1, 1
                 )
         return input  # self.conv(input, lead)
 
@@ -135,7 +133,7 @@ class ConvBlock3d(nn.Module):
         in_dim,
         out_dims,
         cond_dim=None,  # lead_time_embed_dim
-        end_pool=True,
+        end_pool=None, #should be None, 3d, or 2d
         skip=True,
     ):
         super(ConvBlock3d, self).__init__()
@@ -158,16 +156,21 @@ class ConvBlock3d(nn.Module):
                     cond_dim=cond_dim,
                 ))
         self.conv=nn.ModuleList(layers)
-        if self.end_pool:
+        if self.end_pool == '3d':
             self.pool=nn.MaxPool3d(kernel_size=2, stride=2, padding=0)
+        elif self.end_pool == '2d':
+            self.pool=nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
 
 
     def forward(self, input, lead=None):
         feats = input
         for layer in self.conv:
             feats = layer(feats,lead)
-        if self.end_pool:
+        if self.end_pool=='3d':
             feats_down = self.pool(feats)
+        elif self.end_pool=='2d':
+            feats_down = self.pool(feats[:,:,0]) #B, C, T, H, W
+            feats_down = feats_down.unsqueeze(2)
         else:
             feats_down = feats
         if self.skip:
@@ -182,8 +185,10 @@ class CenterConvBlock3d(nn.Module):
         in_dim,
         out_dims,
         cond_dim=None,  # lead_time_embed_dim
+        op_type='3d', # 3d or 2d
     ):
         super(CenterConvBlock3d, self).__init__()
+        self.op_type=op_type
 
         layers=[]
         for i in range(len(out_dims)-1):
@@ -202,14 +207,21 @@ class CenterConvBlock3d(nn.Module):
                     cond_dim=cond_dim,
                 ))
         self.conv=nn.ModuleList(layers)
-        self.out = nn.ConvTranspose3d(out_dims[-2], out_dims[-1], kernel_size=3, stride=2, padding=1, output_padding=1)
+        if self.op_type=='3d':
+            self.out = nn.ConvTranspose3d(out_dims[-2], out_dims[-1], kernel_size=3, stride=2, padding=1, output_padding=1)
+        elif self.op_type=='2d':
+            self.out = nn.ConvTranspose2d(out_dims[-2], out_dims[-1], kernel_size=3, stride=2, padding=1, output_padding=1)
 
 
     def forward(self, input, lead=None):
         feats = input
         for layer in self.conv:
             feats = layer(feats,lead)
-        return self.out(feats)
+        if self.op_type=='3d':
+            return self.out(feats)
+        elif self.op_type=='2d':
+            out = self.out(feats[:,:,0]) #B, C, T, H, W
+            return out.unsqueeze(2)
 
 
 class UNet3D(nn.Module):
@@ -220,25 +232,27 @@ class UNet3D(nn.Module):
         feats=8, 
         pad_value=None, 
         zero_pad=True, 
-        cond_dim=None
+        cond_dim=None,
+        op_type='3d', # should be 3d or 2d
     ):
         super(UNet3D, self).__init__()
         self.input_dim = input_dim
         self.out_conv = out_conv
         self.pad_value = pad_value
         self.zero_pad = zero_pad
+        self.op_type = op_type
         self.encoder1 = ConvBlock3d(
             in_dim=input_dim, 
             out_dims=[feats*4,feats*4], 
             cond_dim=cond_dim,
-            end_pool=True,
+            end_pool=self.op_type,
             skip=True
         )
         self.encoder2 = ConvBlock3d(
             in_dim=feats*4, 
             out_dims=[feats*8, feats*8], 
             cond_dim=cond_dim,
-            end_pool=True,
+            end_pool=self.op_type,
             skip=True
         )
 
@@ -246,7 +260,8 @@ class UNet3D(nn.Module):
         self.center = CenterConvBlock3d(
             in_dim=feats*8,
             out_dims=out_dims_center,
-            cond_dim=cond_dim
+            cond_dim=cond_dim,
+            op_type=self.op_type
         )
 
         decoder_layers1 = []
@@ -255,7 +270,7 @@ class UNet3D(nn.Module):
                 in_dim=feats*16,
                 out_dims=[feats*8, feats*8],
                 cond_dim=cond_dim,
-                end_pool=False,
+                end_pool=None,
                 skip=False
             )
         )
@@ -264,7 +279,7 @@ class UNet3D(nn.Module):
                 in_dim=feats*8,
                 out_dim=feats*4,
                 cond_dim=cond_dim,
-                block=True
+                op_type=self.op_type
             )
         )
         self.decoder1 = nn.ModuleList(decoder_layers1)
@@ -273,14 +288,14 @@ class UNet3D(nn.Module):
                 in_dim=feats*8,
                 out_dims=[feats*4, feats*2],
                 cond_dim=cond_dim,
-                end_pool=False,
+                end_pool=None,
                 skip=False
             )
         self.out_conv = nn.Conv3d(feats * 2, out_conv, kernel_size=3, stride=1, padding=1)
 
 
     def forward(self, x, lead=None):
-        out = x.permute(0, 2, 1, 3, 4)
+        out = x.permute(0, 2, 1, 3, 4) #B, C, T, H, W
         if self.pad_value is not None:
             pad_mask = (out == self.pad_value).all(dim=-1).all(dim=-1).all(dim=1)  # BxT pad mask
             if self.zero_pad:
@@ -296,7 +311,6 @@ class UNet3D(nn.Module):
         feats_up = self.decoder2(feats_up,lead)
         final = self.out_conv(feats_up)
         final = final.permute(0, 1, 3, 4, 2)  # BxCxHxWxT
-        print('FINAL', final.shape)
         if self.pad_value is not None:
             if pad_mask.any():
                 # masked mean
@@ -309,7 +323,6 @@ class UNet3D(nn.Module):
                 out = final.mean(dim=-1)
         else:
             out = final.mean(dim=-1)
-        print('OUT', out.shape)
         # FINAL torch.Size([8, 5, 32, 32, 12])
         # OUT torch.Size([8, 5, 32, 32])
         return out

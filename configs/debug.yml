@@ -19,7 +19,7 @@ data_sources:
   - hand
   - s1
 
-n_classes: 2
+n_classes: 3
 batch_size: 1
 lr: 0.001
 lr_decay: 0.9999

@@ -286,7 +286,7 @@ class Two3DUNet(nn.Module):
             context_embed_input_dim += 1
         self.context_embed = unet3d.UNet3D(
             input_dim=context_embed_input_dim,
-            out_conv=[context_embed_output_dim],
+            out_conv=context_embed_output_dim,
         )
 
         # Create local embedding/prediction layers
@@ -301,7 +301,7 @@ class Two3DUNet(nn.Module):
             self.lead_time_embedding = nn.Embedding(self.len_lead, lead_time_dim)
         self.local_embed = unet3d.UNet3D(
             input_dim=local_input_dim,
-            out_conv=[64, n_predict],
+            out_conv=n_predict,
             cond_dim=lead_time_dim,
         )
 
@@ -368,7 +368,6 @@ class Two3DUNet(nn.Module):
         else:
             context_inp = torch.cat([era5l_inp, era5_inp], dim=2)
         context_embedded = self.context_embed(context_inp)
-        context_embedded = context_embedded[:, 0]
 
         # Select the central 2x2 pixels and average
         if self.center_crop_context:
@@ -428,7 +427,7 @@ if __name__ == "__main__":
     era5_bands = list(range(n_era5))
     era5l_bands = list(range(n_era5_land))
     hydroatlas_bands = list(range(n_hydroatlas))
-    model = TwoUTAE(
+    model = Two3DUNet(
         era5_bands,
         era5l_bands,
         hydroatlas_bands,

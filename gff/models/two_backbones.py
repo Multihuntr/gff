@@ -185,8 +185,7 @@ class ModelBackbones(nn.Module):
 
     def forward(self, ex):
         B, N, cC, cH, cW = ex["era5"].shape
-        # print("to(torch.float32) was added for metnet")
-        batch_positions = torch.arange(0, N).reshape((1, N)).repeat((B, 1)).to(ex["era5"].device).to(torch.float32)
+        batch_positions = torch.arange(0, N).reshape((1, N)).repeat((B, 1)).to(ex["era5"].device)
         if self.w_s1:
             example_local = ex["s1"]
         else:

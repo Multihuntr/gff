@@ -68,11 +68,13 @@ def create(C):
             w_hydroatlas_basin=("hydroatlas_basin" in C["data_sources"]),
             w_dem_context=("dem_context" in C["data_sources"]),
             w_dem_local=("dem_local" in C["data_sources"]),
-            w_hand=('hand' in C['data_sources']),
+            w_hand=("hand" in C["data_sources"]),
             w_s1=("s1" in C["data_sources"]),
             n_predict=C["n_classes"],
             weather_window_size=C["weather_window"],
             context_embed_output_dim=C["context_embed_output_dim"],
+            center_crop_context=C["center_crop_context"],
+            average_context=C["average_context"],
             temp_encoding=C["temp_encoding"],
         )
     else:

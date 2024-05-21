@@ -99,6 +99,7 @@ class TwoUTAE(nn.Module):
             encoder_widths=[32, 32],
             decoder_widths=[32, 32],
             out_conv=[context_embed_output_dim],
+            cond_dim=lead_time_dim,
             temp_encoding=self.temp_encoding,
         )
 
@@ -168,6 +169,13 @@ class TwoUTAE(nn.Module):
         dem_local_inp = nans_to_zero(dem_local_inp)
         hand_inp = nans_to_zero(hand_inp)
 
+        # Get Lead time embedding indexes
+        if self.w_s1:
+            lead_idx = self.get_lead_time_idx(ex["s1_lead_days"])
+            lead = self.lead_time_embedding(lead_idx)
+        else:
+            lead = None
+
         # Process context inputs
         context_statics_lst = []
         if self.w_hydroatlas_basin:
@@ -183,7 +191,7 @@ class TwoUTAE(nn.Module):
             context_inp = torch.cat([era5l_inp, era5_inp, context_statics], dim=2)
         else:
             context_inp = torch.cat([era5l_inp, era5_inp], dim=2)
-        context_embedded = self.context_embed(context_inp, batch_positions)
+        context_embedded = self.context_embed(context_inp, batch_positions, lead=lead)
         context_embedded = context_embedded[:, 0]
 
         # Select the central 2x2 pixels and average
@@ -197,13 +205,6 @@ class TwoUTAE(nn.Module):
         if self.average_context:
             context_out = context_out.mean(axis=(2, 3), keepdims=True)
         context_out_upsc = F.interpolate(context_out, size=(fH, fW), mode="nearest")
-
-        # Get Lead time embedding indexes
-        if self.w_s1:
-            lead_idx = self.get_lead_time_idx(ex["s1_lead_days"])
-            lead = self.lead_time_embedding(lead_idx)
-        else:
-            lead = None
 
         # Process local inputs
         local_lst = [context_out_upsc]

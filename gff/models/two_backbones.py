@@ -171,18 +171,18 @@ class ModelBackbones(nn.Module):
             options_metnet["lead_time_embed_dim"] = lead_time_dim
             options_metnet["out_conv"] = n_predict
             self.local_embed = metnet.MetNet3(**options_metnet)
-        elif backbone == '3dunet':
+        elif backbone == "3dunet":
             self.context_embed = unet3d.UNet3D(
                 input_dim=context_embed_input_dim,
                 out_conv=context_embed_output_dim,
                 cond_dim=lead_time_dim,
-                op_type='3d',
+                op_type="3d",
             )
             self.local_embed = unet3d.UNet3D(
                 input_dim=local_input_dim,
                 out_conv=n_predict,
                 cond_dim=lead_time_dim,
-                op_type='2d',
+                op_type="2d",
             )
         else:
             raise NotImplementedError(f"Unknown model name: {backbone}")
@@ -256,8 +256,10 @@ class ModelBackbones(nn.Module):
             context_inp = torch.cat([era5l_inp, era5_inp, context_statics], dim=2)
         else:
             context_inp = torch.cat([era5l_inp, era5_inp], dim=2)
-        context_embedded = self.context_embed(context_inp, batch_positions=batch_positions, lead=lead)
-        if backbone != '3dunet':
+        context_embedded = self.context_embed(
+            context_inp, batch_positions=batch_positions, lead=lead
+        )
+        if self.backbone != "3dunet":
             context_embedded = context_embedded[:, 0]
 
         # Select the central 2x2 pixels and average
@@ -284,10 +286,10 @@ class ModelBackbones(nn.Module):
         # Pretend it's temporal data with one time step for utae
         local_inp = local_inp[:, None]
         out = self.local_embed(local_inp, batch_positions=batch_positions[:, :1], lead=lead)
-        if backbone != '3dunet':
+        if self.backbone != "3dunet":
             out = out[:, 0]
         return out
-    
+
 
 if __name__ == "__main__":
     # For debugging

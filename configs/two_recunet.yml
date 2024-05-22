@@ -8,8 +8,8 @@ model: two_backbones
 backbone: recunet_lstm
 hydroatlas_dim: 16
 lead_time_dim: 16
-context_embed_output_dim: 5
-center_crop_context: True
+context_embed_output_dim: 128
+center_crop_context: False
 average_context: False
 
 dataset: forecast_dataset

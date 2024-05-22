@@ -8,9 +8,9 @@ model: two_backbones
 backbone: utae
 hydroatlas_dim: 16
 lead_time_dim: 16
-context_embed_output_dim: 5
+context_embed_output_dim: 128
 weather_window: 20
-center_crop_context: True
+center_crop_context: False
 average_context: False
 
 dataset: debug_dataset

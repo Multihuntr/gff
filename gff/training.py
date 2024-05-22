@@ -253,6 +253,7 @@ def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=Non
             writer.add_figure("confusion_matrix", fig, custom_writer.count)
 
             scheduler.step()
+            do_save(epoch)
     finally:
         writer.close()
         do_save(hoisted_epoch)

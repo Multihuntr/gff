@@ -294,7 +294,7 @@ class UNet3D(nn.Module):
         self.out_conv = nn.Conv3d(feats * 2, out_conv, kernel_size=3, stride=1, padding=1)
 
 
-    def forward(self, x, lead=None):
+    def forward(self, x, batch_positions=None, lead=None):
         out = x.permute(0, 2, 1, 3, 4) #B, C, T, H, W
         if self.pad_value is not None:
             pad_mask = (out == self.pad_value).all(dim=-1).all(dim=-1).all(dim=1)  # BxT pad mask

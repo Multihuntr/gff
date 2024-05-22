@@ -251,6 +251,7 @@ def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=Non
             axs[1].set_title("Val")
             fig.tight_layout()
             writer.add_figure("confusion_matrix", fig, custom_writer.count)
+            plt.close(fig)
 
             scheduler.step()
             do_save(epoch)

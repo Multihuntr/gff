@@ -3,10 +3,11 @@ import re
 import sys
 from pathlib import Path
 
+from matplotlib import pyplot as plt
 import pandas
-import torch
 import yaml
 
+import gff.constants
 import gff.dataloaders
 import gff.evaluation
 import gff.models.creation
@@ -33,6 +34,19 @@ def fname_is_ks(fname: str):
     return re.match(r"\d{3}-\d{1,2}-", fname) is not None
 
 
+def evaluate_and_save(model_folder, fnames, out_path, targ_path, n_cls, suffix=""):
+    eval_results, test_cm = gff.evaluation.evaluate_floodmaps(fnames, out_path, targ_path, n_cls)
+    with open(model_folder / f"eval_results{suffix}.yml", "w") as f:
+        yaml.safe_dump(eval_results, f)
+    fig, ax = plt.subplots(1, 1, figsize=(7, 5))
+    test_cm.plot(ax=ax, labels=gff.constants.KUROSIWO_CLASS_NAMES[:n_cls])
+    ax.set_title(f"Test{suffix}")
+    fig.tight_layout()
+    fig.savefig(model_folder / f"test_cm{suffix}.png")
+    fig.savefig(model_folder / f"test_cm{suffix}.eps")
+    plt.close(fig)
+
+
 def main(args):
     # Load config file, and overwrite anything from cmdline arguments
     with open(args.model_folder / "config.yml") as f:
@@ -50,12 +64,8 @@ def main(args):
     targ_path = data_path / "rois"
     out_path = args.model_folder / "inference"
     n_cls = C["n_classes"]
-    eval_results = gff.evaluation.evaluate_floodmaps(fnames, out_path, targ_path, n_cls)
-    with open(args.model_folder / "eval_results.yml", "w") as f:
-        yaml.safe_dump(eval_results, f)
-    ks_eval_results = gff.evaluation.evaluate_floodmaps(ks_fnames, out_path, targ_path, n_cls)
-    with open(args.model_folder / "eval_results_ks.yml", "w") as f:
-        yaml.safe_dump(ks_eval_results, f)
+    evaluate_and_save(args.model_folder, fnames, out_path, targ_path, n_cls)
+    evaluate_and_save(args.model_folder, ks_fnames, out_path, targ_path, n_cls, "_ks")
 
 
 if __name__ == "__main__":

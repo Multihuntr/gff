@@ -3,9 +3,11 @@ import datetime
 import sys
 from pathlib import Path
 
+from matplotlib import pyplot as plt
 import torch
 import yaml
 
+import gff.constants
 import gff.dataloaders
 import gff.evaluation
 import gff.models.creation
@@ -59,11 +61,19 @@ def main(args):
     out_path = gff.evaluation.model_inference(model_folder, model, test_dl)
     tst_fnames = test_dl.dataset.meta_fnames
     targ_path = Path(C["data_folder"]).expanduser() / "rois"
-    eval_results = gff.evaluation.evaluate_floodmaps(
+    eval_results, test_cm = gff.evaluation.evaluate_floodmaps(
         tst_fnames, out_path, targ_path, C["n_classes"]
     )
     with open(model_folder / "eval_results.yml", "w") as f:
         yaml.safe_dump(eval_results, f)
+
+    fig, ax = plt.subplots(1, 1, figsize=(7, 5))
+    test_cm.plot(ax=ax, labels=gff.constants.KUROSIWO_CLASS_NAMES)
+    ax.set_title("Test")
+    fig.tight_layout()
+    fig.savefig(model_folder / "test_cm.png")
+    fig.savefig(model_folder / "test_cm.eps")
+    plt.close(fig)
 
 
 if __name__ == "__main__":

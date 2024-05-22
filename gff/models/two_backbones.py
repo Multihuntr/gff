@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# from . import utae
+# from . import utae, metnet
 import gff.models.utae as utae
-import gff.models.unet3d as unet3d
+import gff.models.metnet as metnet
 
 
 def nans_to_zero(t: torch.Tensor | None):
@@ -30,7 +30,25 @@ def get_empty_norms(era5_bands: int, era5l_bands: int, hydroatlas_bands: int):
     }
 
 
-class TwoUTAE(nn.Module):
+options_metnet = {
+    "dim": 64,
+    "attn_depth": 12,
+    "attn_dim_head": 64,
+    "attn_heads": 16,
+    "attn_dropout": 0.1,
+    "vit_window_size": 8,
+    "vit_mbconv_expansion_rate": 4,
+    "vit_mbconv_shrinkage_rate": 0.25,
+    "resnet_block_depth": 2,
+}
+# "input_2496_channels" : context_embed_input_dim,
+# input_4996_channels : 16 + 1,
+# "surface_and_hrrr_target_spatial_size" : 128,
+# "hrrr_channels" : 256,
+# crop_size_post_16km : 48,
+
+
+class ModelBackbones(nn.Module):
     def __init__(
         self,
         era5_bands,
@@ -49,7 +67,7 @@ class TwoUTAE(nn.Module):
         context_embed_output_dim=5,
         center_crop_context=True,
         average_context=True,
-        temp_encoding="ltae",
+        backbone="utae",
     ):
         super().__init__()
         self.era5_bands = era5_bands
@@ -64,7 +82,7 @@ class TwoUTAE(nn.Module):
         self.weather_window_size = weather_window_size
         self.center_crop_context = center_crop_context
         self.average_context = average_context
-        self.temp_encoding = temp_encoding
+        self.backbone = backbone
 
         # Store normalisation info on model
         # (To load model weights, the shapes must be identical; so use empty if not known at init)
@@ -84,7 +102,7 @@ class TwoUTAE(nn.Module):
             (not self.w_s1) and (lead_time_dim is None)
         ), "If you provide s1, you must also provide lead_time_dim. If not, you shouldn't."
 
-        # Create context embedding layers
+        # Determine context embedding sizes
         self.n_weather = len(era5_bands) + len(era5l_bands)
         self.n_hydroatlas = len(hydroatlas_bands)
         context_embed_input_dim = self.n_weather
@@ -95,16 +113,8 @@ class TwoUTAE(nn.Module):
             context_embed_input_dim += hydroatlas_dim
         if self.w_dem_context:
             context_embed_input_dim += 1
-        self.context_embed = utae.UTAE(
-            context_embed_input_dim,
-            encoder_widths=[32, 32],
-            decoder_widths=[32, 32],
-            out_conv=[context_embed_output_dim],
-            cond_dim=lead_time_dim,
-            temp_encoding=self.temp_encoding,
-        )
 
-        # Create local embedding/prediction layers
+        # Determine local sizes
         local_input_dim = context_embed_output_dim
         if self.w_dem_local:
             local_input_dim += 1
@@ -114,14 +124,54 @@ class TwoUTAE(nn.Module):
             local_input_dim += 2
             self.len_lead = weather_window_size + 1
             self.lead_time_embedding = nn.Embedding(self.len_lead, lead_time_dim)
-        self.local_embed = utae.UTAE(
-            local_input_dim,
-            encoder_widths=[64, 64, 64, 128],
-            decoder_widths=[64, 64, 64, 128],
-            out_conv=[64, n_predict],
-            cond_dim=lead_time_dim,
-            temp_encoding=self.temp_encoding,
-        )
+
+        # Instantiate backbones
+        if backbone == "utae":
+            self.context_embed = utae.UTAE(
+                context_embed_input_dim,
+                encoder_widths=[32, 32],
+                decoder_widths=[32, 32],
+                out_conv=[context_embed_output_dim],
+                cond_dim=lead_time_dim,
+                temp_encoding="ltae",
+            )
+            self.local_embed = utae.UTAE(
+                local_input_dim,
+                encoder_widths=[64, 64, 64, 128],
+                decoder_widths=[64, 64, 64, 128],
+                out_conv=[64, n_predict],
+                cond_dim=lead_time_dim,
+                temp_encoding="ltae",
+            )
+        elif backbone == "recunet_lstm":
+            self.context_embed = utae.UTAE(
+                context_embed_input_dim,
+                encoder_widths=[32, 32],
+                decoder_widths=[32, 32],
+                out_conv=[context_embed_output_dim],
+                cond_dim=lead_time_dim,
+                temp_encoding="lstm",
+            )
+            self.local_embed = utae.UTAE(
+                local_input_dim,
+                encoder_widths=[64, 64, 64, 128],
+                decoder_widths=[64, 64, 64, 128],
+                out_conv=[64, n_predict],
+                cond_dim=lead_time_dim,
+                temp_encoding="lstm",
+            )
+        elif backbone == "metnet":
+            options_metnet["dim_in"] = weather_window_size * context_embed_input_dim
+            options_metnet["lead_time_embed_dim"] = lead_time_dim
+            options_metnet["out_conv"] = context_embed_output_dim
+            self.context_embed = metnet.MetNet3(**options_metnet)
+
+            options_metnet["dim_in"] = 1 * local_input_dim
+            options_metnet["lead_time_embed_dim"] = lead_time_dim
+            options_metnet["out_conv"] = n_predict
+            self.local_embed = metnet.MetNet3(**options_metnet)
+        else:
+            raise NotImplementedError(f"Unknown model name: {backbone}")
 
     def normalise(self, ex, key, suffix=None):
         if suffix is not None:
@@ -430,91 +480,32 @@ if __name__ == "__main__":
     era5_bands = list(range(n_era5))
     era5l_bands = list(range(n_era5_land))
     hydroatlas_bands = list(range(n_hydroatlas))
-    model = TwoUTAE(
-        era5_bands,
-        era5l_bands,
-        hydroatlas_bands,
-        hydroatlas_dim,
-        lead_time_dim,
-    )
-    model = model.cuda()
-    model1 = TwoUTAE(
-        era5_bands,
-        era5l_bands,
-        lead_time_dim=lead_time_dim,
-        w_hydroatlas_basin=False,
-    )
-    model1 = model1.cuda()
-    model2 = TwoUTAE(
-        era5_bands,
-        era5l_bands,
-        lead_time_dim=lead_time_dim,
-        w_hydroatlas_basin=False,
-        w_dem_context=False,
-    )
-    model2 = model2.cuda()
-    model3 = TwoUTAE(
-        era5_bands,
-        era5l_bands,
-        lead_time_dim=lead_time_dim,
-        w_hydroatlas_basin=False,
-        w_dem_context=False,
-    )
-    model3 = model3.cuda()
-    model4 = TwoUTAE(
-        era5_bands,
-        era5l_bands,
-        w_hydroatlas_basin=False,
-        w_dem_context=False,
-        w_s1=False,
-    )
-    model4 = model4.cuda()
-    model5 = TwoUTAE(
-        era5_bands,
-        era5l_bands,
-        lead_time_dim=lead_time_dim,
-        w_hydroatlas_basin=False,
-        w_dem_context=False,
-        w_dem_local=False,
-    )
-    model5 = model5.cuda()
-    model6 = TwoUTAE(
-        era5_bands,
-        era5l_bands,
-        lead_time_dim=lead_time_dim,
-        w_hydroatlas_basin=False,
-        w_dem_context=False,
-        w_dem_local=False,
-        average_context=False,
-    )
-    model6 = model6.cuda()
-    model7 = Two3DUNet(
-        era5_bands,
-        era5l_bands,
-        lead_time_dim=lead_time_dim,
-        w_hydroatlas_basin=False,
-        w_dem_context=False,
-        w_dem_local=False,
-        center_crop_context=False,
-        average_context=False,
-    )
-    model7 = model7.cuda()
-    print("Model")
-    out = model(ex)
-    # Only hydroatlas will cause problems if provided after saying we wouldn't
-    ex.pop("hydroatlas_basin")
-    print("Model 1")
-    out = model1(ex)
-    print("Model 2")
-    out = model2(ex)
-    print("Model 3")
-    out = model3(ex)
-    print("Model 4")
-    out = model4(ex)
-    print("Model 5")
-    out = model5(ex)
-    print("Model 6")
-    out = model6(ex)
-    print("Model 7")
-    out = model7(ex)
-    print(out.shape)
+    to_remove = [
+        {},
+        {"w_hydroatlas_basin": False},
+        {"w_dem_context": False},
+        {"w_s1": False},
+        {"w_dem_local": False},
+        {"w_hand": False},
+    ]
+
+    for d in to_remove:
+        for backbone in ["utae", "recunet_lstm", "metnet"]:
+            if d.get("w_s1", True):
+                lead = {"lead_time_dim": lead_time_dim}
+            else:
+                lead = {}
+            model = ModelBackbones(
+                era5_bands,
+                era5l_bands,
+                hydroatlas_bands,
+                hydroatlas_dim,
+                **lead,
+                **d,
+                weather_window_size=T,
+                backbone=backbone,
+            ).cuda()
+            out = model(ex)
+            assert out.shape == (8, 3, 224, 224)
+            print("🗸", end="")
+    print()

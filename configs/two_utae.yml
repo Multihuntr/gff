@@ -4,13 +4,13 @@ device: cuda:0
 
 name: two_utae
 
-model: two_utae
+model: two_backbones
+backbone: utae
 hydroatlas_dim: 16
 lead_time_dim: 16
 context_embed_output_dim: 5
 center_crop_context: True
 average_context: False
-temp_encoding: ltae
 
 dataset: forecast_dataset
 fold: 0

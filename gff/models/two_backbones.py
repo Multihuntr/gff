@@ -5,6 +5,7 @@ import torch.nn.functional as F
 # from . import utae, metnet
 import gff.models.utae as utae
 import gff.models.metnet as metnet
+import gff.models.unet3d as unet3d
 
 
 def nans_to_zero(t: torch.Tensor | None):

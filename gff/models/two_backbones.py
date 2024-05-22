@@ -171,6 +171,14 @@ class ModelBackbones(nn.Module):
             options_metnet["lead_time_embed_dim"] = lead_time_dim
             options_metnet["out_conv"] = n_predict
             self.local_embed = metnet.MetNet3(**options_metnet)
+        elif backbone == '3dunet':
+            self.context_embed = unet3d.UNet3D(
+                input_dim=context_embed_input_dim,
+                out_conv=context_embed_output_dim,
+                cond_dim=lead_time_dim,
+                op_type='3d',
+            )
+            
         else:
             raise NotImplementedError(f"Unknown model name: {backbone}")
 

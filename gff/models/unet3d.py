@@ -23,14 +23,12 @@ class ConvLayer3d(nn.Module):
     ):
         super(ConvLayer3d, self).__init__()
 
-        self.mlp = None  # TODO: FiLM
+        self.mlp = None 
 
         layers = []       
         layers.append(nn.Conv3d(in_dim, out_dim, kernel_size=3, stride=1, padding=1))
         layers.append(nn.BatchNorm3d(out_dim))
         layers.append(nn.LeakyReLU(inplace=True))
-        # if pool:
-        #     layers.append(nn.MaxPool3d(kernel_size=2, stride=2, padding=0))
         self.conv = nn.Sequential(*layers)
 
         if exists(cond_dim):
@@ -63,7 +61,7 @@ class ConvLayer3d(nn.Module):
                 input = input * (scale.repeat(replicate_each_t, 1, 1, 1, 1) + 1) + shift.repeat(
                     replicate_each_t, 1, 1, 1, 1
                 )
-        return input  # self.conv(input, lead)
+        return input
     
 
 class ConvTransposeLayer3d(nn.Module):
@@ -76,7 +74,7 @@ class ConvTransposeLayer3d(nn.Module):
     ):
         super(ConvTransposeLayer3d, self).__init__()
         self.op_type=op_type
-        self.mlp = None  # TODO: FiLM
+        self.mlp = None
 
         layers = []    
         self.norm_then_relu = []  
@@ -124,7 +122,7 @@ class ConvTransposeLayer3d(nn.Module):
                 input = input * (scale.repeat(replicate_each_t, 1, 1, 1, 1) + 1) + shift.repeat(
                     replicate_each_t, 1, 1, 1, 1
                 )
-        return input  # self.conv(input, lead)
+        return input
 
 
 class ConvBlock3d(nn.Module):
@@ -323,6 +321,4 @@ class UNet3D(nn.Module):
                 out = final.mean(dim=-1)
         else:
             out = final.mean(dim=-1)
-        # FINAL torch.Size([8, 5, 32, 32, 12])
-        # OUT torch.Size([8, 5, 32, 32])
         return out

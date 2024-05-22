@@ -1,3 +1,4 @@
+from matplotlib import pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
@@ -6,6 +7,7 @@ import torchmetrics
 import torchmetrics.classification
 import tqdm
 
+import gff.constants
 import gff.util
 
 
@@ -48,10 +50,10 @@ class CustomWriter:
 
     def write_imgs(self, ex: dict, pred: torch.Tensor, targ: torch.Tensor):
         # Pred vs target
-        most_water_ex = ((targ == 1) | (targ == 2)).sum(axis=(1, 2, 3)).argmax()
-        pred_cls = pred[most_water_ex].argmax(dim=0).numpy()
+        half_water_ex = np.abs(0.5 - ((targ == 1) | (targ == 2)).sum(axis=(1, 2, 3))).argmax()
+        pred_cls = pred[half_water_ex].argmax(dim=0).numpy()
         pred_rgb = cls_to_rgb(pred_cls)
-        targ_cls = targ[most_water_ex, 0].numpy()
+        targ_cls = targ[half_water_ex, 0].numpy()
         targ_rgb = cls_to_rgb(targ_cls)
         pred_v_targ = np.stack([pred_rgb, targ_rgb])
         self.writer.add_images("pred_vs_targ", pred_v_targ, self.count, dataformats="NHWC")
@@ -114,9 +116,12 @@ def train_epoch(
     )
     loss_all = torchmetrics.MeanMetric()
     loss_prog = torchmetrics.MeanMetric()
+    cm = torchmetrics.classification.MulticlassConfusionMatrix(
+        n_classes, ignore_index=-100, normalize="true"
+    )
     # Move everything to whatever device the model is on
     device = next(model.parameters()).device
-    for thing in [f1_all, f1_prog, loss_all, loss_prog, criterion]:
+    for thing in [f1_all, f1_prog, loss_all, loss_prog, cm, criterion]:
         thing.to(device)
     pbar = tqdm.tqdm(dataloader, desc="Training", leave=False)
     for i, example_cpu in enumerate(pbar):
@@ -131,6 +136,7 @@ def train_epoch(
 
         f1_all.update(pred, targ[:, 0])
         f1_prog.update(pred, targ[:, 0])
+        cm.update(pred, targ[:, 0])
         loss_all.update(loss)
         loss_prog.update(loss)
         if (i % scalar_freq) == 0 and i != 0:
@@ -144,7 +150,7 @@ def train_epoch(
         if (i % img_freq) == 0 and i != 0:
             custom_writer.write_imgs(example_cpu, pred.detach().cpu(), targ.detach().cpu())
         custom_writer.step()
-    return loss_all.compute().cpu().item(), f1_all.compute().cpu().numpy().tolist()
+    return (loss_all.compute().cpu().item(), f1_all.compute().cpu().numpy().tolist(), cm)
 
 
 def val_epoch(model, dataloader, criterion, n_classes, limit: int = None):
@@ -154,24 +160,27 @@ def val_epoch(model, dataloader, criterion, n_classes, limit: int = None):
         f1 = torchmetrics.classification.MulticlassF1Score(
             n_classes, average="none", ignore_index=-100
         )
-        f1.to(device)
         loss_all = torchmetrics.MeanMetric()
-        loss_all.to(device)
+        cm = torchmetrics.classification.MulticlassConfusionMatrix(
+            n_classes, ignore_index=-100, normalize="true"
+        )
+        for thing in [f1, loss_all, cm, criterion]:
+            thing.to(device)
         total_steps = len(dataloader) if limit is None else limit
-        for i, example in enumerate(
-            tqdm.tqdm(dataloader, desc="Val-ing", leave=False, total=total_steps)
-        ):
+        pbar = tqdm.tqdm(dataloader, desc="Val-ing", leave=False, total=total_steps)
+        for i, example in enumerate(pbar):
             example = gff.util.recursive_todevice(example, device)
             targ = example.pop("floodmap")
             pred = model(example)
 
             loss = criterion(pred, targ[:, 0])
 
-            f1(pred, targ[:, 0])
-            loss_all(loss)
+            f1.update(pred, targ[:, 0])
+            cm.update(pred, targ[:, 0])
+            loss_all.update(loss)
             if limit is not None and i >= limit:
                 break
-    return loss_all.compute().cpu().item(), f1.compute().cpu().numpy().tolist()
+    return (loss_all.compute().cpu().item(), f1.compute().cpu().numpy().tolist(), cm)
 
 
 def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=None):
@@ -208,7 +217,7 @@ def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=Non
         pbar = tqdm.tqdm(range(start_epoch, C["epochs"]), desc="Epochs")
         for epoch in pbar:
             hoisted_epoch = epoch
-            train_loss, train_f1s = train_epoch(
+            train_loss, train_f1s, train_cm = train_epoch(
                 model,
                 train_dl,
                 criterion,
@@ -218,8 +227,11 @@ def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=Non
                 scalar_freq=C["scalar_freq"],
                 img_freq=C["img_freq"],
             )
-            val_loss, val_f1s = val_epoch(model, val_dl, criterion, C["n_classes"], limit=256)
+            val_loss, val_f1s, val_cm = val_epoch(
+                model, val_dl, criterion, C["n_classes"], limit=256
+            )
 
+            # Write statistics to Tensorboard
             writer.add_scalar("Loss/train_epoch", train_loss, custom_writer.count)
             writer.add_scalar("Loss/val", val_loss, custom_writer.count)
             for i in range(C["n_classes"]):
@@ -230,6 +242,15 @@ def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=Non
             writer.add_scalar("F1/train_epoch", train_f1, custom_writer.count)
             writer.add_scalar("F1/val", val_f1, custom_writer.count)
             pbar.set_description(f"Epochs [val F1: {val_f1:4.2f}]")
+
+            # Draw confustion matrix to Tensorboard
+            fig, axs = plt.subplots(1, 2, figsize=(14, 5))
+            train_cm.plot(ax=axs[0], labels=gff.constants.KUROSIWO_CLASS_NAMES)
+            val_cm.plot(ax=axs[1], labels=gff.constants.KUROSIWO_CLASS_NAMES)
+            axs[0].set_title("Train")
+            axs[1].set_title("Val")
+            fig.tight_layout()
+            writer.add_figure("confusion_matrix", fig, custom_writer.count)
 
             scheduler.step()
     finally:

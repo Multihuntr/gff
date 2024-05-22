@@ -217,16 +217,6 @@ def main(args):
         # Exit if we've added enough
         if basin_group_perc >= 1:
             print(complete_str)
-            calc_completion(
-                exp_basin_distr,
-                cur_basin_flood_distr,
-                cur_basin_noflood_distr,
-                exp_cont_sites,
-                added_sites,
-                len(basin_floods),
-                i,
-                args.continent,
-            )
             break
 
         key = f"{basin_row.ID}-{basin_row.HYBAS_ID}"

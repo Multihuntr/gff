@@ -2,10 +2,10 @@ seed: 6426452
 data_folder: ~/NFS_era5/gff
 device: cuda:0
 
-name: two_recunet
+name: two_metnet
 
 model: two_backbones
-backbone: recunet_lstm
+backbone: metnet
 hydroatlas_dim: 16
 lead_time_dim: 16
 context_embed_output_dim: 5

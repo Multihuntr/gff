@@ -36,197 +36,6 @@ def exists(val):
     return val is not None
 
 
-class UNet(nn.Module):
-    def __init__(
-        self,
-        input_dim,
-        encoder_widths=[64, 64, 64, 128],
-        decoder_widths=[32, 32, 64, 128],
-        out_conv=[2],
-        out_nonlin_mean=False,
-        out_nonlin_var="relu",
-        str_conv_k=4,
-        str_conv_s=2,
-        str_conv_p=1,
-        encoder_norm="group",
-        norm_skip="batch",
-        norm_up="batch",
-        decoder_norm="batch",
-        encoder=False,
-        return_maps=False,
-        pad_value=0,
-        padding_mode="reflect",
-    ):
-        """
-        U-Net architecture for spatial pre-training of UTAE on mono-temporal data, excluding LTAE temporal encoder.
-        Args:
-            input_dim (int): Number of channels in the input images.
-            encoder_widths (List[int]): List giving the number of channels of the successive encoder_widths of the convolutional encoder.
-            This argument also defines the number of encoder_widths (i.e. the number of downsampling steps +1)
-            in the architecture.
-            The number of channels are given from top to bottom, i.e. from the highest to the lowest resolution.
-            decoder_widths (List[int], optional): Same as encoder_widths but for the decoder. The order in which the number of
-            channels should be given is also from top to bottom. If this argument is not specified the decoder
-            will have the same configuration as the encoder.
-            out_conv (List[int]): Number of channels of the successive convolutions for the
-            str_conv_k (int): Kernel size of the strided up and down convolutions.
-            str_conv_s (int): Stride of the strided up and down convolutions.
-            str_conv_p (int): Padding of the strided up and down convolutions.
-            agg_mode (str): Aggregation mode for the skip connections. Can either be:
-                - att_group (default) : Attention weighted temporal average, using the same
-                channel grouping strategy as in the LTAE. The attention masks are bilinearly
-                resampled to the resolution of the skipped feature maps.
-                - att_mean : Attention weighted temporal average,
-                 using the average attention scores across heads for each date.
-                - mean : Temporal average excluding padded dates.
-            encoder_norm (str): Type of normalisation layer to use in the encoding branch. Can either be:
-                - group : GroupNorm (default)
-                - batch : BatchNorm
-                - instance : InstanceNorm
-                - none: apply no normalization
-            norm_skip (str): similar to encoder_norm, just controlling the normalization after convolving skipped maps
-            norm_up (str): similar to encoder_norm, just controlling the normalization after transposed convolution
-            decoder_norm (str): similar to encoder_norm
-            n_head (int): Number of heads in LTAE.
-            d_model (int): Parameter of LTAE
-            d_k (int): Key-Query space dimension
-            encoder (bool): If true, the feature maps instead of the class scores are returned (default False)
-            return_maps (bool): If true, the feature maps instead of the class scores are returned (default False)
-            pad_value (float): Value used by the dataloader for temporal padding.
-            padding_mode (str): Spatial padding strategy for convolutional layers (passed to nn.Conv2d).
-            positional_encoding (bool): If False, no positional encoding is used (default True).
-        """
-        super(UNet, self).__init__()
-        self.n_stages = len(encoder_widths)
-        self.return_maps = return_maps
-        self.encoder_widths = encoder_widths
-        self.decoder_widths = decoder_widths
-        self.enc_dim = decoder_widths[0] if decoder_widths is not None else encoder_widths[0]
-        self.stack_dim = sum(decoder_widths) if decoder_widths is not None else sum(encoder_widths)
-        self.pad_value = pad_value
-        self.encoder = encoder
-        if encoder:
-            self.return_maps = True
-
-        if decoder_widths is not None:
-            assert len(encoder_widths) == len(decoder_widths)
-            assert encoder_widths[-1] == decoder_widths[-1]
-        else:
-            decoder_widths = encoder_widths
-
-        # ENCODER
-        self.in_conv = ConvBlock(
-            nkernels=[input_dim] + [encoder_widths[0]],
-            k=1,
-            s=1,
-            p=0,
-            pad_value=pad_value,
-            norm=encoder_norm,
-            padding_mode=padding_mode,
-        )
-        self.down_blocks = nn.ModuleList(
-            DownConvBlock(
-                d_in=encoder_widths[i],
-                d_out=encoder_widths[i + 1],
-                k=str_conv_k,
-                s=str_conv_s,
-                p=str_conv_p,
-                pad_value=pad_value,
-                norm=encoder_norm,
-                padding_mode=padding_mode,
-            )
-            for i in range(self.n_stages - 1)
-        )
-        # DECODER
-        self.up_blocks = nn.ModuleList(
-            UpConvBlock(
-                d_in=decoder_widths[i],
-                d_out=decoder_widths[i - 1],
-                d_skip=encoder_widths[i - 1],
-                k=str_conv_k,
-                s=str_conv_s,
-                p=str_conv_p,
-                norm_skip=norm_skip,  #'batch'
-                norm_up=norm_up,  # 'batch'
-                norm=decoder_norm,  # "batch",
-                padding_mode=padding_mode,
-            )
-            for i in range(self.n_stages - 1, 0, -1)
-        )
-        # note: not including normalization layer and ReLU nonlinearity into the final ConvBlock,
-        #       if inserting >1 layers into out_conv then consider treating normalizations separately
-        self.out_dims = out_conv[-1]
-        self.out_conv = ConvBlock(
-            nkernels=[decoder_widths[0]] + out_conv,
-            k=1,
-            s=1,
-            p=0,
-            padding_mode=padding_mode,
-            norm="none",
-            last_relu=False,
-        )
-
-        if out_nonlin_mean:
-            self.out_mean = nn.Sigmoid()  # this is for predicting mean values in [0, 1]
-        else:
-            self.out_mean = (
-                nn.Identity()
-            )  # just keep the mean estimates, without applying a nonlinearity
-
-        if out_nonlin_var == "relu":
-            self.out_var = nn.ReLU()  # this is for predicting var values > 0
-        elif out_nonlin_var == "softplus":
-            self.out_var = nn.Softplus(
-                beta=1, threshold=20
-            )  # a smooth approximation to the ReLU function
-        elif out_nonlin_var == "elu":
-            self.out_var = lambda vars: nn.ELU()(vars) + 1 + 1e-8
-        else:  # just keep the variance estimates,
-            self.out_var = (
-                nn.Identity()
-            )  # just keep the variance estimates, without applying a nonlinearity
-
-    def forward(self, input, batch_positions=None, return_att=False):
-        # SPATIAL ENCODER
-        # collect feature maps in list 'feature_maps'
-        out = self.in_conv.smart_forward(input)
-        feature_maps = [out]
-        for i in range(self.n_stages - 1):
-            out = self.down_blocks[i].smart_forward(feature_maps[-1])
-            feature_maps.append(out)
-        # SPATIAL DECODER
-        if self.return_maps:
-            maps = [out]
-        out = out[:, 0, ...]  # note: we index to reduce the temporal dummy dimension of size 1
-        for i in range(self.n_stages - 1):
-            # skip-connect features between paired encoder/decoder blocks
-            skip = feature_maps[-(i + 2)]
-            # upconv the features, concatenating current 'out' and paired 'skip'
-            out = self.up_blocks[i](
-                out, skip[:, 0, ...]
-            )  # note: we index to reduce the temporal dummy dimension of size 1
-            if self.return_maps:
-                maps.append(out)
-
-        if self.encoder:
-            return out, maps
-        else:
-            out = self.out_conv(out)
-            # append a singelton temporal dimension such that outputs are [B x T=1 x C x H x W]
-            out = out.unsqueeze(1)
-            # optionally apply an output nonlinearity
-            out_mean = self.out_mean(out[:, :, :2, ...])  # mean predictions
-            out_std = self.out_var(out[:, :, 2:, ...])  # var predictions > 0
-            out = torch.cat((out_mean, out_std), dim=2)  # stack mean and var predictions
-
-            if return_att:
-                return out, None
-            if self.return_maps:
-                return out, maps
-            else:
-                return out
-
-
 class UTAE(nn.Module):
     def __init__(
         self,
@@ -317,22 +126,6 @@ class UTAE(nn.Module):
         else:
             decoder_widths = encoder_widths
 
-        # TODO:
-        # insert two parallel ResNet branches:
-        #   i) for coarse GTSM, with conventional CONV kernels
-        #   ii) for sparse points, with partial CONV kernels # TODO: inspect outputs, still containing NaNs?
-
-        """
-        import util.partialconv.models.partialconv2d as partialconv2d
-        # see https://github.com/NVIDIA/partialconv, https://github.com/NVIDIA/partialconv/blob/master/models/partialconv2d.py
-
-        self.in_conv_sparse     = partialconv2d.PartialConv2d(1, 16, kernel_size=3, stride=1, padding=1, bias=True, multi_channel=False, return_mask=True)
-        self.in_conv_sparse2    = partialconv2d.PartialConv2d(16, 32, kernel_size=3, stride=1, padding=1, bias=True, multi_channel=False, return_mask=True)
-
-        self.in_conv_coarse     = nn.Conv2d(in_channels=5-1, out_channels=16, kernel_size=3, padding=1, stride=1, padding_mode="reflect")
-        self.in_conv_coarse2    = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1, stride=1, padding_mode="reflect")
-        input_dim               = 2*32
-        """
 
         # ENCODER
         self.in_conv = ConvBlock(
@@ -444,21 +237,6 @@ class UTAE(nn.Module):
         pad_mask = (input == self.pad_value).all(dim=-1).all(dim=-1).all(dim=-1)  # BxT pad mask
         # SPATIAL ENCODER
         # collect feature maps in list 'feature_maps'
-
-        """
-        db = 42
-        # process sparse input channels
-        b, t, c, h, w = input.shape
-        input_sparse, mask = self.in_conv_sparse(input[:,[0], ...].view(b*t, 1, h, w), torch.isnan(input[:,[0], ...].view(b*t, 1, h, w)).float())
-        input_sparse, mask = self.in_conv_sparse2(input_sparse, mask)
-
-        input_coarse = self.in_conv_coarse(input[:,1:, ...].reshape(b*t, 5-1, h, w))
-        input_coarse = self.in_conv_coarse2(input_coarse)
-        # x and mask are [b*t, C_out, h, w] and [b*t, 1, h, w], respectively
-        # process non-sparse input channels
-
-        input = torch.cat([input_sparse.view(b, t, input_sparse.shape[1], h, w), input_coarse.view(b, t, input_coarse.shape[1], h, w)], dim=2)
-        """
 
         out = self.in_conv.smart_forward(input, lead)
         feature_maps = [out]
@@ -573,7 +351,7 @@ class ConvLayer(nn.Module):
     ):
         super(ConvLayer, self).__init__()
 
-        self.mlp = None  # TODO: FiLM
+        self.mlp = None
 
         layers = []
         out_dim = []
@@ -615,10 +393,8 @@ class ConvLayer(nn.Module):
             self.norm_then_relu.append(exists(nl) and uses_relu)
         self.conv = nn.Sequential(*layers)
 
-        # TODO: FiLM
         # for each Conv2d followed by normalization, define a separate MLP + NOT followed by ReLU
         # note: for Met-Net3, 1 block is always 2 CONV in https://github.com/lucidrains/metnet3-pytorch/blob/a0b107d7f4b792f612341a33b63b54f79200f998/metnet3_pytorch/metnet3_pytorch.py#L164
-
         if exists(cond_dim):
             self.mlp = [
                 nn.Sequential(
@@ -631,10 +407,7 @@ class ConvLayer(nn.Module):
             ]
 
     def forward(self, input, lead=None):
-        # TODO: FiLM
-
         assert not (exists(self.mlp) ^ exists(lead))
-
         # at each MLP (1 MLP per normalized CONV layer) compute the conditioning
         scale_shift = None
         if exists(self.mlp) and exists(lead):
@@ -667,7 +440,7 @@ class ConvLayer(nn.Module):
                     replicate_each_t, 1, 1, 1
                 )
                 idx = idx + 1
-        return input  # self.conv(input, lead)
+        return input
 
 
 class ConvBlock(TemporallySharedBlock):
@@ -793,15 +566,6 @@ class UpConvBlock(nn.Module):
             )
 
         # transposed CONV layer to perform upsampling
-        """
-        self.up = nn.Sequential(
-            nn.ConvTranspose2d(
-                in_channels=d_in, out_channels=d_out, kernel_size=k, stride=s, padding=p
-            ),
-            nn.BatchNorm2d(d_out),
-            nn.ReLU(),
-        )
-        """
         if norm_up in ["group", "batch", "instance"]:
             self.up = nn.Sequential(
                 nn.ConvTranspose2d(
@@ -823,7 +587,7 @@ class UpConvBlock(nn.Module):
         self.conv1 = ConvLayer(
             nkernels=[d_out + d, d_out],
             norm=norm,
-            cond_dim=cond_dim,  # TODO: FiLM here
+            cond_dim=cond_dim,
             padding_mode=padding_mode,  # removing  downsampling relu in UpConvBlock because of MobileNet2
         )
         out_dims.append(d_out)
@@ -976,160 +740,3 @@ class Temporal_Aggregator(nn.Module):
             elif self.mode == "mean":
                 return x.mean(dim=1)
 
-
-class RecUNet(nn.Module):
-    """Recurrent U-Net architecture. Similar to the U-TAE architecture but
-    the L-TAE is replaced by a recurrent network
-    and temporal averages are computed for the skip connections."""
-
-    def __init__(
-        self,
-        input_dim,
-        encoder_widths=[64, 64, 64, 128],
-        decoder_widths=[32, 32, 64, 128],
-        out_conv=[13],
-        str_conv_k=4,
-        str_conv_s=2,
-        str_conv_p=1,
-        temporal="lstm",
-        input_size=128,
-        encoder_norm="group",
-        hidden_dim=128,
-        encoder=False,
-        padding_mode="reflect",
-        pad_value=0,
-    ):
-        super(RecUNet, self).__init__()
-        self.n_stages = len(encoder_widths)
-        self.temporal = temporal
-        self.encoder_widths = encoder_widths
-        self.decoder_widths = decoder_widths
-        self.enc_dim = decoder_widths[0] if decoder_widths is not None else encoder_widths[0]
-        self.stack_dim = sum(decoder_widths) if decoder_widths is not None else sum(encoder_widths)
-        self.pad_value = pad_value
-
-        self.encoder = encoder
-        if encoder:
-            self.return_maps = True
-        else:
-            self.return_maps = False
-
-        if decoder_widths is not None:
-            assert len(encoder_widths) == len(decoder_widths)
-            assert encoder_widths[-1] == decoder_widths[-1]
-        else:
-            decoder_widths = encoder_widths
-
-        self.in_conv = ConvBlock(
-            nkernels=[input_dim] + [encoder_widths[0], encoder_widths[0]],
-            pad_value=pad_value,
-            norm=encoder_norm,
-        )
-
-        self.down_blocks = nn.ModuleList(
-            DownConvBlock(
-                d_in=encoder_widths[i],
-                d_out=encoder_widths[i + 1],
-                k=str_conv_k,
-                s=str_conv_s,
-                p=str_conv_p,
-                pad_value=pad_value,
-                norm=encoder_norm,
-                padding_mode=padding_mode,
-            )
-            for i in range(self.n_stages - 1)
-        )
-        self.up_blocks = nn.ModuleList(
-            UpConvBlock(
-                d_in=decoder_widths[i],
-                d_out=decoder_widths[i - 1],
-                d_skip=encoder_widths[i - 1],
-                k=str_conv_k,
-                s=str_conv_s,
-                p=str_conv_p,
-                norm=encoder_norm,
-                padding_mode=padding_mode,
-            )
-            for i in range(self.n_stages - 1, 0, -1)
-        )
-        self.temporal_aggregator = Temporal_Aggregator(mode="mean")
-
-        if temporal == "mean":
-            self.temporal_encoder = Temporal_Aggregator(mode="mean")
-        elif temporal == "lstm":
-            size = int(input_size / str_conv_s ** (self.n_stages - 1))
-            self.temporal_encoder = ConvLSTM(
-                input_dim=encoder_widths[-1],
-                input_size=(size, size),
-                hidden_dim=hidden_dim,
-                kernel_size=(3, 3),
-            )
-            self.out_convlstm = nn.Conv2d(
-                in_channels=hidden_dim,
-                out_channels=encoder_widths[-1],
-                kernel_size=3,
-                padding=1,
-            )
-        elif temporal == "blstm":
-            size = int(input_size / str_conv_s ** (self.n_stages - 1))
-            self.temporal_encoder = BConvLSTM(
-                input_dim=encoder_widths[-1],
-                input_size=(size, size),
-                hidden_dim=hidden_dim,
-                kernel_size=(3, 3),
-            )
-            self.out_convlstm = nn.Conv2d(
-                in_channels=2 * hidden_dim,
-                out_channels=encoder_widths[-1],
-                kernel_size=3,
-                padding=1,
-            )
-        elif temporal == "mono":
-            self.temporal_encoder = None
-        self.out_conv = ConvBlock(
-            nkernels=[decoder_widths[0]] + out_conv, k=1, s=1, p=0, padding_mode=padding_mode
-        )
-
-    def forward(self, input, batch_positions=None):
-        pad_mask = (input == self.pad_value).all(dim=-1).all(dim=-1).all(dim=-1)  # BxT pad mask
-
-        out = self.in_conv.smart_forward(input)
-
-        feature_maps = [out]
-        # ENCODER
-        for i in range(self.n_stages - 1):
-            out = self.down_blocks[i].smart_forward(feature_maps[-1])
-            feature_maps.append(out)
-
-        # Temporal encoder
-        if self.temporal == "mean":
-            out = self.temporal_encoder(feature_maps[-1], pad_mask=pad_mask)
-        elif self.temporal == "lstm":
-            _, out = self.temporal_encoder(feature_maps[-1], pad_mask=pad_mask)
-            out = out[0][1]  # take last cell state as embedding
-            out = self.out_convlstm(out)
-        elif self.temporal == "blstm":
-            out = self.temporal_encoder(feature_maps[-1], pad_mask=pad_mask)
-            out = self.out_convlstm(out)
-        elif self.temporal == "mono":
-            out = feature_maps[-1]
-
-        if self.return_maps:
-            maps = [out]
-        for i in range(self.n_stages - 1):
-            if self.temporal != "mono":
-                skip = self.temporal_aggregator(feature_maps[-(i + 2)], pad_mask=pad_mask)
-            else:
-                skip = feature_maps[-(i + 2)]
-            out = self.up_blocks[i](out, skip)
-            if self.return_maps:
-                maps.append(out)
-
-        if self.encoder:
-            return out, maps
-        else:
-            out = self.out_conv(out)
-            if self.return_maps:
-                return out, maps
-            else:
-                return out

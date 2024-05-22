@@ -5,6 +5,7 @@ import torch.nn.functional as F
 # from . import utae, metnet
 import gff.models.utae as utae
 import gff.models.metnet as metnet
+import gff.models.unet3d as unet3d
 
 
 def nans_to_zero(t: torch.Tensor | None):
@@ -170,6 +171,19 @@ class ModelBackbones(nn.Module):
             options_metnet["lead_time_embed_dim"] = lead_time_dim
             options_metnet["out_conv"] = n_predict
             self.local_embed = metnet.MetNet3(**options_metnet)
+        elif backbone == '3dunet':
+            self.context_embed = unet3d.UNet3D(
+                input_dim=context_embed_input_dim,
+                out_conv=context_embed_output_dim,
+                cond_dim=lead_time_dim,
+                op_type='3d',
+            )
+            self.local_embed = unet3d.UNet3D(
+                input_dim=local_input_dim,
+                out_conv=n_predict,
+                cond_dim=lead_time_dim,
+                op_type='2d',
+            )
         else:
             raise NotImplementedError(f"Unknown model name: {backbone}")
 
@@ -242,8 +256,9 @@ class ModelBackbones(nn.Module):
             context_inp = torch.cat([era5l_inp, era5_inp, context_statics], dim=2)
         else:
             context_inp = torch.cat([era5l_inp, era5_inp], dim=2)
-        context_embedded = self.context_embed(context_inp, batch_positions, lead=lead)
-        context_embedded = context_embedded[:, 0]
+        context_embedded = self.context_embed(context_inp, batch_positions=batch_positions, lead=lead)
+        if backbone != '3dunet':
+            context_embedded = context_embedded[:, 0]
 
         # Select the central 2x2 pixels and average
         if self.center_crop_context:
@@ -268,10 +283,11 @@ class ModelBackbones(nn.Module):
         local_inp = torch.cat(local_lst, dim=1)
         # Pretend it's temporal data with one time step for utae
         local_inp = local_inp[:, None]
-        out = self.local_embed(local_inp, batch_positions[:, :1], lead=lead)
-        out = out[:, 0]
+        out = self.local_embed(local_inp, batch_positions=batch_positions[:, :1], lead=lead)
+        if backbone != '3dunet':
+            out = out[:, 0]
         return out
-
+    
 
 if __name__ == "__main__":
     # For debugging
@@ -306,7 +322,7 @@ if __name__ == "__main__":
     ]
 
     for d in to_remove:
-        for backbone in ["utae", "recunet_lstm", "metnet"]:
+        for backbone in ["utae", "recunet_lstm", "metnet", "3dunet"]:
             if d.get("w_s1", True):
                 lead = {"lead_time_dim": lead_time_dim}
             else:

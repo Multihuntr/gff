@@ -13,8 +13,7 @@ from torch.nn import Module, ModuleList, Sequential
 from einops import rearrange, repeat, reduce, pack, unpack
 from einops.layers.torch import Rearrange, Reduce
 
-from beartype import beartype
-from beartype.typing import Tuple, Union, List, Optional, Dict, Literal
+from typing import Optional 
 
 import pickle
 
@@ -338,7 +337,6 @@ class XCAttention(Module):
     this specific linear attention was proposed in https://arxiv.org/abs/2106.09681 (El-Nouby et al.)
     """
 
-    @beartype
     def __init__(
         self,
         *,
@@ -672,7 +670,6 @@ LossBreakdown = namedtuple('LossBreakdown', [
 ])
 
 class MetNet3(Module):
-    @beartype
     def __init__(
         self,
         *,
@@ -815,7 +812,6 @@ class MetNet3(Module):
 
         self.load_state_dict(state_dict, strict = strict)
 
-    @beartype
     def forward(
         self,
         X,

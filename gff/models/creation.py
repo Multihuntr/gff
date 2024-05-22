@@ -53,7 +53,7 @@ def create(C):
         from . import debug_model
 
         return debug_model.DebugModel()
-    elif C["model"] == "two_utae" or C["model"] == "two_metnet":
+    elif C["model"] == "two_backbones":
         from . import two_backbones
 
         norms = get_norms(C)
@@ -75,8 +75,7 @@ def create(C):
             context_embed_output_dim=C["context_embed_output_dim"],
             center_crop_context=C["center_crop_context"],
             average_context=C["average_context"],
-            temp_encoding=C["temp_encoding"],
-            model_name=C["model"]
+            backbone=C["backbone"],
         )
     else:
         raise NotImplementedError("Not a valid model name")

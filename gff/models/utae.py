@@ -13,7 +13,7 @@ import torch.nn as nn
 import numpy as np
 from einops import rearrange
 
-from .convlstm import ConvLSTM, BConvLSTM
+from .convlstm import ConvLSTM
 from .ltae import LTAE2d
 
 

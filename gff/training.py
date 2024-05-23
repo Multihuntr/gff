@@ -50,7 +50,7 @@ class CustomWriter:
 
     def write_imgs(self, ex: dict, pred: torch.Tensor, targ: torch.Tensor):
         # Pred vs target
-        half_water_ex = np.abs(0.5 - ((targ == 1) | (targ == 2)).sum(axis=(1, 2, 3))).argmax()
+        half_water_ex = np.abs(0.5 - ((targ == 1) | (targ == 2)).mean(axis=(1, 2, 3))).argmax()
         pred_cls = pred[half_water_ex].argmax(dim=0).numpy()
         pred_rgb = cls_to_rgb(pred_cls)
         targ_cls = targ[half_water_ex, 0].numpy()

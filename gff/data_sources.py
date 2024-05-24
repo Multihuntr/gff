@@ -401,6 +401,15 @@ def _era5_data_ram(fpath: Path, band_idxs: tuple):
         return data, tif.transform
 
 
+@functools.cache
+def _tif_data_ram(fpath: Path):
+    memfile = rasterio.MemoryFile()
+    with open(fpath, "rb") as tif:
+        memfile.write(tif.read())
+    tif = rasterio.open(memfile, "r+")
+    return tif
+
+
 def load_exported_era5(
     fpath: Path,
     geom: shapely.Geometry,
@@ -437,22 +446,29 @@ def load_exported_era5(
 
 
 def load_pregenerated_raster(
-    fpath: Path, geom: shapely.Geometry, res: int, keys: list[str] | list[int] = None
+    fpath: Path,
+    geom: shapely.Geometry,
+    res: tuple[int, int],
+    band_idxs: tuple[int] = (1,),
+    cache_in_ram: bool = False,
 ):
-    with rasterio.open(fpath) as tif:
-        if keys is None:
-            band_idxs = list(range(1, len(tif.descriptions) + 1))
-        elif isinstance(keys[0], int):
-            band_idxs = keys
-        else:
-            band_idxs = [tif.descriptions.index(k) + 1 for k in keys]
-        window = util.shapely_bounds_to_rasterio_window(geom.bounds, tif.transform, align=False)
-        return tif.read(
-            band_idxs,
-            window=window,
-            out_shape=(res, res),
-            resampling=rasterio.enums.Resampling.bilinear,
-        )
+    if cache_in_ram:
+        tif = _tif_data_ram(fpath)
+    else:
+        tif = rasterio.open(fpath)
+
+    window = util.shapely_bounds_to_rasterio_window(geom.bounds, tif.transform, align=False)
+
+    data = tif.read(
+        band_idxs,
+        window=window,
+        out_shape=res,
+        resampling=rasterio.enums.Resampling.bilinear,
+    )
+
+    if not cache_in_ram:
+        tif.close()
+    return data
 
 
 def get_climate_zone_from_static(folder: Path, geom: shapely.Geometry):

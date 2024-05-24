@@ -189,7 +189,12 @@ def resample_bilinear_subpixel(arr, bounds):
     return out
 
 
-def get_tile(
+@functools.cache
+def _get_tile_cached(*args, **kwargs):
+    return _get_tile_uncached(*args, **kwargs)
+
+
+def _get_tile_uncached(
     p: Union[Path, rasterio.DatasetReader],
     bounds: tuple[float, float, float, float] = None,
     bounds_px: tuple[int, int, int, int] = None,
@@ -216,7 +221,16 @@ def get_tile(
     return result
 
 
+def get_tile(*args, cache: bool = False, **kwargs):
+    if cache:
+        return _get_tile_cached(*args, **kwargs)
+    else:
+        return _get_tile_uncached(*args, **kwargs)
+
+
 if os.environ.get("CACHE_LOADED_TILES_IN_RAM", "no")[0].lower() == "y":
+    # TODO: Fix this mess of caching. In one case we need to put a limit, in the other we don't.
+    #       os.environ sets a max, but passing the cache argument does not.
     get_tile = functools.lru_cache(maxsize=16384)(get_tile)
 
 
@@ -330,8 +344,8 @@ def seed_packages(seed):
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
-    # torch.use_deterministic_algorithms(True, warn_only=True)
-    # torch.backends.cudnn.benchmark = False
+    torch.use_deterministic_algorithms(True, warn_only=True)
+    torch.backends.cudnn.benchmark = False
 
 
 # The ol' misc. functions

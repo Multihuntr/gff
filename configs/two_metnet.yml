@@ -15,7 +15,8 @@ average_context: False
 dataset: forecast_dataset
 fold: 0
 weather_window: 20
-cache_era5_in_ram: True
+cache_local_in_ram: False
+cache_context_in_ram: True
 data_sources:
   - era5
   - era5_land
@@ -28,15 +29,15 @@ data_sources:
 n_classes: 3
 batch_size: 16
 lr: 0.001
-lr_decay: 0.9
-epochs: 20
+lr_decay: 0.84
+epochs: 12
 num_workers: 2
 scalar_freq: 64
 img_freq: 32
 class_weights:
   - 0.5
   - 2
-  - 20
+  - 5
 
 hydroatlas_keys:
   - aet_mm_uyr

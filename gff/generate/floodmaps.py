@@ -411,7 +411,7 @@ def progressively_grow_floodmaps(
         tif.close()
 
     print(" Tile search complete. Postprocessing outputs.")
-    postprocess(raw_floodmap_path, floodmap_path, nodata=floodmap_nodata)
+    postprocess_classes(raw_floodmap_path, floodmap_path, floodmap_nodata)
     return fill_tiles, geom_stats, n_flooded, s1_fpaths
 
 
@@ -421,7 +421,7 @@ def remove_tiles_outside(meta_path: Path, basins_df: geopandas.GeoDataFrame):
 
     v_path = meta_path.parent / meta["visit_tiles"]
     visit_tiles = geopandas.read_file(v_path, engine="pyogrio", use_arrow=True)
-    _, visit_mask = util.tile_mask_for_basin(visit_tiles.geometry, basins_df)
+    hybas_id, visit_mask = util.tile_mask_for_basin(visit_tiles.geometry, basins_df)
 
     # Write nodata to tiles outside majority basin
     with rasterio.open(meta_path.parent / meta["floodmap"], "r+") as tif:
@@ -435,6 +435,10 @@ def remove_tiles_outside(meta_path: Path, basins_df: geopandas.GeoDataFrame):
 
     visit_tiles = visit_tiles[~visit_mask]
     visit_tiles.to_file(v_path, engine="pyogrio")
+
+    meta["HYBAS_ID_4"] = hybas_id.item()
+    with meta_path.open("w") as f:
+        json.dump(meta, f)
 
 
 def major_upstream_riverways(basins_df, start, bounds, threshold=20000):
@@ -822,25 +826,22 @@ def model_runner(name: str, data_folder: Path):
     return run_flood_model
 
 
-def postprocess(in_fpath, out_fpath, nodata, **kwargs):
-    """
-    Postprocessing:
-    - Clean up the edges
-    """
-    with rasterio.open(in_fpath) as out_tif:
-        floodmaps = out_tif.read()
-        profile = out_tif.profile
+def postprocess_classes(in_fpath, out_fpath, **kwargs):
+    with rasterio.open(in_fpath) as in_tif:
+        floodmaps = in_tif.read()
+        profile = in_tif.profile
+        nodata = in_tif.nodata
 
     nan_mask = floodmaps == nodata
 
-    floodmaps = postprocess_classes(floodmaps[0], mask=(~nan_mask)[0], **kwargs)[None]
+    floodmaps = _postprocess_classes(floodmaps[0], mask=(~nan_mask)[0], **kwargs)[None]
 
     floodmaps[nan_mask] = nodata
     with rasterio.open(out_fpath, "w", **profile) as out_tif:
         out_tif.write(floodmaps)
 
 
-def postprocess_classes(class_map, mask=None, size_threshold=50):
+def _postprocess_classes(class_map, mask=None, size_threshold=50):
     # Smooth edges
     kernel = skimage.morphology.disk(radius=2)
     smoothed = skimage.filters.rank.majority(class_map, kernel, mask=mask)
@@ -878,17 +879,51 @@ def postprocess_classes(class_map, mask=None, size_threshold=50):
     return smoothed
 
 
-def postprocess_world_cover(floodmaps, tiles, transform, crs, folder):
-    for tile in tiles:
-        # Get pixel bounds
-        (ylo, yhi), (xlo, xhi) = util.shapely_bounds_to_rasterio_window(tile.bounds, transform)
+def postprocess_world_cover(data_folder, meta_fpath, basins_df, basins_geom):
+    """
+    Pastes world cover in the ocean tiles.
+    Uses hydroatlas basins_df to determine "ocean tiles".
+    """
+    with open(meta_fpath) as f:
+        meta = json.load(f)
 
-        # Load worldcover
-        cover = data_sources.get_world_cover(tile, crs, folder)
-        cover_res = util.resample_xr(cover, tile.bounds, ((yhi - ylo), (xhi - xlo)))
+    basin_idx = basins_df.HYBAS_ID.values.tolist().index(meta["HYBAS_ID_4"])
+    basin_geoms = np.array(basins_df.geometry.values)
 
-        # Apply permanent water class
-        with warnings.catch_warnings(action="ignore"):
-            cover_np = cover_res.band_data.values.astype(np.uint8)
-        permanent_water_mask = cover_np == constants.WORLDCOVER_PW_CLASS
-        floodmaps[:, ylo:yhi, xlo:xhi][permanent_water_mask] = constants.KUROSIWO_PW_CLASS
+    # Create ocean shp - expand lvl4 basin, subtract all basins
+    basin_geom = basin_geoms[basin_idx]
+    # NOTE: Magic numbers coupled with util.tile_mask_for_basin
+    including_ocean = shapely.buffer(basin_geom, 0.04).simplify(0.01)
+    ocean_shp = shapely.difference(including_ocean, basins_geom)
+
+    # Check which tiles are in the ocean
+    tile_fpath = meta_fpath.parent / meta["visit_tiles"]
+    tiles = geopandas.read_file(tile_fpath, engine="pyogrio", use_arrow=True)
+    tile_geoms = np.array(tiles.geometry.values)[:, None]
+    ocean_mask = shapely.intersects(tile_geoms, ocean_shp)
+    ocean_tiles = tiles[ocean_mask]
+
+    floodmap_fpath = meta_fpath.parent / meta["floodmap"]
+    with rasterio.open(floodmap_fpath, "r+") as tif:
+        for i, tile in ocean_tiles.iterrows():
+            # Get pixel bounds
+            geom = tile.geometry
+            window = util.shapely_bounds_to_rasterio_window(geom.bounds, tif.transform, align=True)
+            (ylo, yhi), (xlo, xhi) = window
+            data = tif.read(window=window)
+
+            # Load worldcover
+            cover = data_sources.get_world_cover(geom, tif.crs, data_folder)
+            cover_res = util.resample_xr(cover, geom.bounds, ((yhi - ylo), (xhi - xlo)))
+
+            # Apply permanent water class
+            # Treat nans as water, as nans only exist outside worldcover bounds (the ocean)
+            cover_np = cover_res.band_data.values
+            nan_mask = np.isnan(cover_res.band_data.values)
+            cover_np[nan_mask] = constants.WORLDCOVER_PW_CLASS
+            # Paste over the generated floodmaps
+            cover_np = cover_np.astype(np.uint8)
+            permanent_water_mask = cover_np == constants.WORLDCOVER_PW_CLASS
+            data[permanent_water_mask] = constants.KUROSIWO_PW_CLASS
+
+            tif.write(data, window=window)

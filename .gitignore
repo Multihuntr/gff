@@ -7,7 +7,6 @@ scraps
 .asf_auth
 preprocessing/Orbits
 preprocessing/dem
-caravan/split
 *.tif
 *.png
 .create_some_maps.sh
@@ -15,3 +14,4 @@ vis
 partitions
 runs
 runs_old
+exemplars

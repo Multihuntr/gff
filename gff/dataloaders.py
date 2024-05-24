@@ -91,6 +91,8 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         self.meta_fnames = sorted(meta_fnames)
         self.metas = self.load_tile_metas()
         self.tiles = self.load_tile_geoms(self.metas)
+        self.hydroatlas_band_idxs = None
+        self.dem_nodata = None
 
     def mk_context_geom(self, geom: shapely.Geometry):
         w = h = gff.constants.CONTEXT_DEGREES
@@ -144,8 +146,10 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         hybas_key = "HYBAS_ID" if "HYBAS_ID" in meta else "HYBAS_ID_4"
         continent = int(str(meta[hybas_key])[0])
         context_res = (gff.constants.CONTEXT_RESOLUTION,) * 2
+        cache_local = self.C["cache_local_in_ram"]
 
-        targ = gff.util.get_tile(floodmap_path, geom.bounds, align=True).astype(np.int64)
+        targ = gff.util.get_tile(floodmap_path, geom.bounds, align=True, cache=cache_local)
+        targ = targ.astype(np.int64)
         targ = gff.util.flatten_classes(targ, self.C["n_classes"])
         result = {
             "floodmap": targ,
@@ -170,7 +174,7 @@ class FloodForecastDataset(torch.utils.data.Dataset):
                 weather_start,
                 weather_end,
                 keys=self.C["era5_land_keys"],
-                cache_in_ram=self.C["cache_era5_in_ram"],
+                cache_in_ram=self.C["cache_context_in_ram"],
             )
             result["era5_land"] = np.array(data, dtype=np.float32)
             result["fpaths"]["era5_land"] = fpath
@@ -182,7 +186,7 @@ class FloodForecastDataset(torch.utils.data.Dataset):
                 weather_start,
                 weather_end,
                 keys=self.C["era5_keys"],
-                cache_in_ram=self.C["cache_era5_in_ram"],
+                cache_in_ram=self.C["cache_context_in_ram"],
             )
             result["era5"] = np.array(data, dtype=np.float32)
             result["fpaths"]["era5"] = fpath
@@ -190,44 +194,47 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         # (Relatively) static soil attributes
         if "hydroatlas_basin" in self.C["data_sources"]:
             fpath = floodmap_path.with_name(floodmap_path.stem + "-hydroatlas.tif")
-            with rasterio.open(fpath) as tif:
-                window = gff.util.shapely_bounds_to_rasterio_window(
-                    context_geom.bounds, tif.transform, align=False
-                )
-                band_idxs = [tif.descriptions.index(k) for k in self.C["hydroatlas_keys"]]
-                data = tif.read(
-                    band_idxs,
-                    window=window,
-                    out_shape=context_res,
-                    resampling=rasterio.enums.Resampling.bilinear,
-                )
+            if self.hydroatlas_band_idxs is None:
+                with rasterio.open(fpath) as tif:
+                    # NOTE: only works because the band idxs are identical across hydroatlas rasters.
+                    self.hydroatlas_band_idxs = tuple(
+                        [1 + tif.descriptions.index(k) for k in self.C["hydroatlas_keys"]]
+                    )
+            data = gff.data_sources.load_pregenerated_raster(
+                fpath,
+                context_geom,
+                context_res,
+                self.hydroatlas_band_idxs,
+                self.C["cache_context_in_ram"],
+            )
             result["hydroatlas_basin"] = np.array(data, dtype=np.float32)
             result["fpaths"]["hydroatlas_basin"] = fpath
 
         # DEM at coarse and fine scales
         if "dem_context" in self.C["data_sources"]:
             fpath = floodmap_path.with_name(floodmap_path.stem + "-dem-context.tif")
-            with rasterio.open(fpath) as tif:
-                window = gff.util.shapely_bounds_to_rasterio_window(
-                    context_geom.bounds, tif.transform, align=False
-                )
-                data = tif.read(
-                    window=window,
-                    out_shape=context_res,
-                    resampling=rasterio.enums.Resampling.bilinear,
-                )
-                nan_mask = data == tif.nodata
+            data = gff.data_sources.load_pregenerated_raster(
+                fpath,
+                context_geom,
+                context_res,
+                (1,),
+                self.C["cache_context_in_ram"],
+            )
+            if self.dem_nodata is None:
+                with rasterio.open(fpath) as tif:
+                    self.dem_nodata = tif.nodata
+            nan_mask = data == self.dem_nodata
             result["dem_context"] = np.array(data, dtype=np.float32)
             result["dem_context"][nan_mask] = np.nan
             result["fpaths"]["dem_context"] = fpath
         if "dem_local" in self.C["data_sources"]:
             fpath = floodmap_path.with_name(floodmap_path.stem + "-dem-local.tif")
-            data = gff.util.get_tile(fpath, geom.bounds, align=True)
+            data = gff.util.get_tile(fpath, geom.bounds, align=True, cache=cache_local)
             result["dem_local"] = np.array(data, dtype=np.float32)
             result["fpaths"]["dem_local"] = fpath
         if "hand" in self.C["data_sources"]:
             fpath = floodmap_path.with_name(floodmap_path.stem + "-hand.tif")
-            data = gff.util.get_tile(fpath, geom.bounds, align=True)
+            data = gff.util.get_tile(fpath, geom.bounds, align=True, cache=cache_local)
             result["hand"] = np.array(data, dtype=np.float32)
             result["fpaths"]["hand"] = fpath
 
@@ -235,7 +242,7 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         if "s1" in self.C["data_sources"]:
             s1_stem = gff.util.get_s1_stem_from_meta(meta)
             s1_path = self.floodmap_path / f"{s1_stem}-s1.tif"
-            result["s1"] = gff.util.get_tile(s1_path, geom.bounds, align=True)
+            result["s1"] = gff.util.get_tile(s1_path, geom.bounds, align=True, cache=cache_local)
             result["fpaths"]["s1"] = fpath
             if np.isnan(result["s1"]).sum() > 0:
                 raise Exception("NO! It can't be!")

@@ -401,15 +401,6 @@ def _era5_data_ram(fpath: Path, band_idxs: tuple):
         return data, tif.transform
 
 
-@functools.cache
-def _tif_data_ram(fpath: Path):
-    memfile = rasterio.MemoryFile()
-    with open(fpath, "rb") as tif:
-        memfile.write(tif.read())
-    tif = rasterio.open(memfile, "r+")
-    return tif
-
-
 def load_exported_era5(
     fpath: Path,
     geom: shapely.Geometry,
@@ -453,7 +444,7 @@ def load_pregenerated_raster(
     cache_in_ram: bool = False,
 ):
     if cache_in_ram:
-        tif = _tif_data_ram(fpath)
+        tif = util.tif_data_ram(fpath)
     else:
         tif = rasterio.open(fpath)
 

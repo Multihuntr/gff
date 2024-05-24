@@ -18,10 +18,9 @@ def parse_args(argv):
     return parser.parse_args(argv)
 
 
-def mk_bar_graph(clim_distrs, labels, xlabel, fnames, title=None, ylabel=None):
+def mk_bar_graph(index, clim_distrs, labels, xlabel, fnames, title=None, ylabel=None):
     fig, ax = plt.subplots(1, 1, figsize=(6, 3.5), dpi=300)
 
-    index = np.array(list(gff.constants.HYDROATLAS_CLIMATE_ZONE_NAMES))
     pos = np.linspace(-0.15, 0.15, len(clim_distrs))
     width = 0.6 / len(clim_distrs)
 
@@ -38,7 +37,7 @@ def mk_bar_graph(clim_distrs, labels, xlabel, fnames, title=None, ylabel=None):
             )
             bottoms += stack
     ax.set_xticks(index)
-    ax.set_xlim([0.5, 18.5])
+    ax.set_xlim([0.5, len(index) + 0.5])
     if title is not None:
         ax.set_title(title)
     ax.set_xlabel(xlabel)
@@ -56,35 +55,49 @@ def main(args):
     with open(args.data_path / "measured_distribution.json") as f:
         distr = json.load(f)
 
+    overall_cont = {}
     overall_clim = {}
     for k in distr:
         overall_clim[k] = collections.defaultdict(lambda: 0)
+        overall_cont[k] = collections.defaultdict(lambda: 0)
         for continent, clim_counts in distr[k].items():
             if k == "floods":
                 clim_counts = clim_counts["zones"]
             for clim_zone, count in clim_counts.items():
+                overall_cont[k][continent] += count
                 overall_clim[k][clim_zone] += count
 
-    combined_counts = collections.defaultdict(lambda: 0)
-    for to_combine in ["created", "negatives"]:
-        for clim_zone, clim_counts in overall_clim[to_combine].items():
-            combined_counts[clim_zone] += clim_counts
-
-    as_np = {}
+    cont_as_np = {}
+    clim_as_np = {}
     for k in overall_clim:
-        as_np[k] = np.zeros(len(gff.constants.HYDROATLAS_CLIMATE_ZONE_NAMES))
+        cont_as_np[k] = np.zeros(len(gff.constants.HYDROATLAS_CONTINENT_NAMES))
+        for i, z in enumerate(gff.constants.HYDROATLAS_CONTINENT_NAMES):
+            cont_as_np[k][i] = overall_cont[k][str(z)]
+        clim_as_np[k] = np.zeros(len(gff.constants.HYDROATLAS_CLIMATE_ZONE_NAMES))
         for i, z in enumerate(gff.constants.HYDROATLAS_CLIMATE_ZONE_NAMES):
-            as_np[k][i] = overall_clim[k][str(z)]
+            clim_as_np[k][i] = overall_clim[k][str(z)]
 
     mk_bar_graph(
-        [[as_np["expected"]], [as_np["created"], as_np["negatives"] / 2]],
+        np.array(list(gff.constants.HYDROATLAS_CONTINENT_NAMES)),
+        [[cont_as_np["expected"]], [cont_as_np["created"], cont_as_np["negatives"] / 2]],
+        [
+            ["Expected distribution"],
+            ["Generated distribution (flood)", "Generated distribution (no-flood)"],
+        ],
+        xlabel="Continent",
+        fnames=["vis/cont-distr.png", "vis/cont-distr.eps"],
+        title="Continent distribution",
+    )
+    mk_bar_graph(
+        np.array(list(gff.constants.HYDROATLAS_CLIMATE_ZONE_NAMES)),
+        [[clim_as_np["expected"]], [clim_as_np["created"], clim_as_np["negatives"] / 2]],
         [
             ["Expected distribution"],
             ["Generated distribution (flood)", "Generated distribution (no-flood)"],
         ],
         xlabel="Climate zone",
         fnames=["vis/clim-zone-distr.png", "vis/clim-zone-distr.eps"],
-        title="Overall distribution",
+        title="Climate zone distribution",
     )
 
 

@@ -30,6 +30,7 @@ class DebugFloodForecastDataset(torch.utils.data.Dataset):
             self.floodmaps[:, :, 112:, 112:] = 2
         else:
             self.floodmaps = np.random.randint(0, 3, size=(self.n_examples, 1, 224, 224))
+        self.floodmaps = gff.util.flatten_classes(self.floodmaps, C["n_classes"])
 
         if "era5" in C["data_sources"]:
             n_era5 = len(C["era5_keys"])

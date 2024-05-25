@@ -190,8 +190,20 @@ def resample_bilinear_subpixel(arr, bounds):
 
 
 @functools.cache
-def _get_tile_cached(*args, **kwargs):
-    return _get_tile_uncached(*args, **kwargs)
+def tif_data_ram(fpath: Path):
+    memfile = rasterio.MemoryFile()
+    with open(fpath, "rb") as tif:
+        memfile.write(tif.read())
+    tif = rasterio.open(memfile, "r+")
+    return tif
+
+
+def _get_tile_cached(p, *args, **kwargs):
+    if isinstance(p, Path):
+        tif = tif_data_ram(p)
+    else:
+        tif = tif_data_ram(p.name)
+    return _get_tile_uncached(tif, *args, **kwargs)
 
 
 def _get_tile_uncached(

@@ -246,8 +246,8 @@ def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=Non
 
             # Draw confustion matrix to Tensorboard
             fig, axs = plt.subplots(1, 2, figsize=(14, 5))
-            train_cm.plot(ax=axs[0], labels=gff.constants.KUROSIWO_CLASS_NAMES)
-            val_cm.plot(ax=axs[1], labels=gff.constants.KUROSIWO_CLASS_NAMES)
+            train_cm.plot(ax=axs[0], labels=gff.constants.KUROSIWO_CLASS_NAMES[: C["n_classes"]])
+            val_cm.plot(ax=axs[1], labels=gff.constants.KUROSIWO_CLASS_NAMES[: C["n_classes"]])
             axs[0].set_title("Train")
             axs[1].set_title("Val")
             fig.tight_layout()

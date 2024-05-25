@@ -68,7 +68,7 @@ def main(args):
         yaml.safe_dump(eval_results, f)
 
     fig, ax = plt.subplots(1, 1, figsize=(7, 5))
-    test_cm.plot(ax=ax, labels=gff.constants.KUROSIWO_CLASS_NAMES)
+    test_cm.plot(ax=ax, labels=gff.constants.KUROSIWO_CLASS_NAMES[: C["n_classes"]])
     ax.set_title("Test")
     fig.tight_layout()
     fig.savefig(model_folder / "test_cm.png")

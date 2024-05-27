@@ -265,7 +265,10 @@ def get_tiles_batched(imgs, geoms: shapely.Geometry, geom_in_px: bool = False):
     return inps
 
 
-def tile_mask_for_basin(
+# Basin utilities
+
+
+def majority_tile_mask_for_basin(
     in_tiles: Sequence[Union[np.ndarray, shapely.Geometry]], basins_df: geopandas.GeoDataFrame
 ):
     """
@@ -293,9 +296,6 @@ def tile_mask_for_basin(
     exclude_mask |= ~shapely.within(tile_centers, just_a_bit_of_ocean)
 
     return hybas_id, exclude_mask
-
-
-# Basin selection utilities
 
 
 def get_upstream_basins(basins, basin_id):

@@ -421,7 +421,7 @@ def remove_tiles_outside(meta_path: Path, basins_df: geopandas.GeoDataFrame):
 
     v_path = meta_path.parent / meta["visit_tiles"]
     visit_tiles = geopandas.read_file(v_path, engine="pyogrio", use_arrow=True)
-    hybas_id, visit_mask = util.tile_mask_for_basin(visit_tiles.geometry, basins_df)
+    hybas_id, visit_mask = util.majority_tile_mask_for_basin(visit_tiles.geometry, basins_df)
 
     # Write nodata to tiles outside majority basin
     with rasterio.open(meta_path.parent / meta["floodmap"], "r+") as tif:
@@ -892,7 +892,7 @@ def postprocess_world_cover(data_folder, meta_fpath, basins_df, basins_geom):
 
     # Create ocean shp - expand lvl4 basin, subtract all basins
     basin_geom = basin_geoms[basin_idx]
-    # NOTE: Magic numbers coupled with util.tile_mask_for_basin
+    # NOTE: Magic numbers coupled with util.majority_tile_mask_for_basin
     including_ocean = shapely.buffer(basin_geom, 0.04).simplify(0.01)
     ocean_shp = shapely.difference(including_ocean, basins_geom)
 

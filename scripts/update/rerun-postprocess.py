@@ -5,7 +5,6 @@ import sys
 
 import geopandas
 import numpy as np
-import rasterio
 import shapely
 import tqdm
 

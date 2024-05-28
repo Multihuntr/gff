@@ -30,6 +30,7 @@ def parse_args(argv):
 
 
 def main(args):
+    torch.set_grad_enabled(False)
     # Load config file, and overwrite anything from cmdline arguments
     with open(args.model_folder / "config.yml") as f:
         C = yaml.safe_load(f)

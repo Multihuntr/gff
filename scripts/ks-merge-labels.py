@@ -107,7 +107,7 @@ def main(args):
         # Create GPKG: Filter tiles based on assigned lvl4 basin
         geoms_np = np.array(geoms)
         geoms_np_4326 = gff.util.convert_crs(geoms_np, "EPSG:3857", basins04_df.crs)
-        hybas_id, geom_mask = gff.util.tile_mask_for_basin(geoms_np_4326, basins04_df)
+        hybas_id, geom_mask = gff.util.majority_tile_mask_for_basin(geoms_np_4326, basins04_df)
 
         out_geoms = []
         geom_stats = []

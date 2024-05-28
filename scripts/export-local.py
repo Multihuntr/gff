@@ -22,9 +22,16 @@ def parse_args(argv):
 
 
 def export_resample_by_fnc(
-    data_path, out_fpath, fnc, spatial_profile, visit_tiles, max_error=0.5, overwrite=False
+    data_path,
+    out_fpath,
+    fnc,
+    spatial_profile,
+    visit_tiles,
+    max_error=0.5,
+    overwrite=False,
+    method="linear",
 ):
-    # Export a upsampled to match floodmap
+    # Export an upsampled version to match floodmap
     profile = {
         **gff.constants.S1_PROFILE_DEFAULTS,
         "MAX_Z_ERROR": max_error,
@@ -41,7 +48,7 @@ def export_resample_by_fnc(
                 data,
                 tile_4326.bounds,
                 (gff.constants.LOCAL_RESOLUTION,) * 2,
-                method="linear",
+                method=method,
             ).band_data.values
             window = gff.util.shapely_bounds_to_rasterio_window(tile.bounds, tif.transform)
             tif.write(resampled, window=window)
@@ -112,6 +119,20 @@ def main(args):
         export_resample_by_fnc(
             args.data_path, hand_fpath, fnc, spatial_profile, visit_tiles, max_error=0.5
         )
+
+        # wc_fpath = floodmap_path.with_name(floodmap_path.stem + "-worldcover.tif")
+        # fnc = gff.data_sources.get_world_cover
+        # wc_profile = {
+        #     **spatial_profile,
+        #     "COMPRESS": "LERC",
+        #     "MAX_Z_ERROR": 0,
+        #     "INTERLEAVE": "BAND",
+        #     "dtype": np.uint8,
+        #     'nodata': 0,
+        # }
+        # export_resample_by_fnc(
+        #     args.data_path, wc_fpath, fnc, wc_profile, visit_tiles, method="nearest"
+        # )
 
 
 if __name__ == "__main__":

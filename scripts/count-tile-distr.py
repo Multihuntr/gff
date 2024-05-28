@@ -10,6 +10,7 @@ def parse_args(argv):
     parser = argparse.ArgumentParser("")
 
     parser.add_argument("data_path", type=Path)
+    parser.add_argument("--only_kurosiwo", action="store_true")
 
     return parser.parse_args(argv)
 
@@ -25,6 +26,9 @@ def main(args):
     for path in paths:
         with open(path) as f:
             meta = json.load(f)
+
+        if args.only_kurosiwo and meta["type"] != "kurosiwo":
+            continue
 
         tiles = geopandas.read_file(
             path.parent / meta["visit_tiles"], engine="pyogrio", use_arrow=True

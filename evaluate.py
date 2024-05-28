@@ -3,7 +3,6 @@ import re
 import sys
 from pathlib import Path
 
-from matplotlib import pyplot as plt
 import pandas
 import yaml
 
@@ -18,6 +17,12 @@ def parse_args(argv):
     parser = argparse.ArgumentParser("Evaluate floodmaps stored in the same format as the labels")
 
     parser.add_argument("model_folder", type=Path)
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cpu",
+        help="evaluating on GPU device is much faster with torchmetrics",
+    )
     parser.add_argument(
         "--overwrite",
         "-o",
@@ -34,19 +39,6 @@ def fname_is_ks(fname: str):
     return re.match(r"\d{3}-\d{1,2}-", fname) is not None
 
 
-def evaluate_and_save(model_folder, fnames, out_path, targ_path, n_cls, suffix=""):
-    eval_results, test_cm = gff.evaluation.evaluate_floodmaps(fnames, out_path, targ_path, n_cls)
-    with open(model_folder / f"eval_results{suffix}.yml", "w") as f:
-        yaml.safe_dump(eval_results, f)
-    fig, ax = plt.subplots(1, 1, figsize=(7, 5))
-    test_cm.plot(ax=ax, labels=gff.constants.KUROSIWO_CLASS_NAMES[:n_cls])
-    ax.set_title(f"Test{suffix}")
-    fig.tight_layout()
-    fig.savefig(model_folder / f"test_cm{suffix}.png")
-    fig.savefig(model_folder / f"test_cm{suffix}.eps")
-    plt.close(fig)
-
-
 def main(args):
     # Load config file, and overwrite anything from cmdline arguments
     with open(args.model_folder / "config.yml") as f:
@@ -58,14 +50,24 @@ def main(args):
     data_path = Path(C["data_folder"]).expanduser()
     fold_names_fpath = data_path / "partitions" / f"floodmap_partition_{C['fold']}.txt"
     fnames = pandas.read_csv(fold_names_fpath, header=None)[0].values.tolist()
-    ks_fnames = [fname for fname in fnames if fname_is_ks(fname)]
-
-    # Evaluate the model
     targ_path = data_path / "rois"
     out_path = args.model_folder / "inference"
     n_cls = C["n_classes"]
-    evaluate_and_save(args.model_folder, fnames, out_path, targ_path, n_cls)
-    evaluate_and_save(args.model_folder, ks_fnames, out_path, targ_path, n_cls, "_ks")
+
+    # Base results
+    eval_results, test_cm = gff.evaluation.evaluate_floodmaps(
+        fnames, out_path, targ_path, n_cls, device=args.device
+    )
+    gff.evaluation.save_results(args.model_folder / "eval_results.yml", eval_results)
+    gff.evaluation.save_cm(test_cm, n_cls, "Test", args.model_folder / "test_cm.png")
+
+    # On KuroSiwo labels
+    ks_fnames = [fname for fname in fnames if fname_is_ks(fname)]
+    eval_results, test_cm = gff.evaluation.evaluate_floodmaps(
+        ks_fnames, out_path, targ_path, n_cls, device=args.device
+    )
+    gff.evaluation.save_results(args.model_folder / "eval_results_ks.yml", eval_results)
+    gff.evaluation.save_cm(test_cm, n_cls, "Test", args.model_folder / "test_cm.png")
 
 
 if __name__ == "__main__":

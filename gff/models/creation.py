@@ -65,6 +65,7 @@ def create(C):
             C["hydroatlas_dim"],
             C["lead_time_dim"],
             norms=norms,
+            w_era5_land=("era5_land" in C["data_sources"]),
             w_hydroatlas_basin=("hydroatlas_basin" in C["data_sources"]),
             w_dem_context=("dem_context" in C["data_sources"]),
             w_dem_local=("dem_local" in C["data_sources"]),

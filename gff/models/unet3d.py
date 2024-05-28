@@ -8,11 +8,22 @@ R.M. Rustowicz et al.
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from einops import rearrange
 
 
 def exists(val):
     return val is not None
+
+class SimpleDynamicLayerNorm(nn.Module):
+    '''
+    Wraps layer norm to dynamically provide shape.
+    Does not learn elementwise affine.
+    '''
+    def forward(self, inp, **kwargs):
+        shp = inp.shape[1:]
+        out = F.layer_norm(inp, shp, **kwargs)
+        return out
 
 class ConvLayer3d(nn.Module):
     def __init__(
@@ -23,11 +34,11 @@ class ConvLayer3d(nn.Module):
     ):
         super(ConvLayer3d, self).__init__()
 
-        self.mlp = None 
+        self.mlp = None
 
-        layers = []       
+        layers = []
         layers.append(nn.Conv3d(in_dim, out_dim, kernel_size=3, stride=1, padding=1))
-        layers.append(nn.BatchNorm3d(out_dim))
+        layers.append(SimpleDynamicLayerNorm())
         layers.append(nn.LeakyReLU(inplace=True))
         self.conv = nn.Sequential(*layers)
 
@@ -47,7 +58,7 @@ class ConvLayer3d(nn.Module):
 
         for _, layer in enumerate(self.conv):
             input = layer(input)
-            isNormLayer = isinstance(layer, nn.BatchNorm3d)
+            isNormLayer = isinstance(layer, SimpleDynamicLayerNorm)
             # apply linear transform on CONV output
             # (following a normalization, and preceding an output non-linearity)
             if (
@@ -62,7 +73,7 @@ class ConvLayer3d(nn.Module):
                     replicate_each_t, 1, 1, 1, 1
                 )
         return input
-    
+
 
 class ConvTransposeLayer3d(nn.Module):
     def __init__(
@@ -76,13 +87,13 @@ class ConvTransposeLayer3d(nn.Module):
         self.op_type=op_type
         self.mlp = None
 
-        layers = []    
-        self.norm_then_relu = []  
+        layers = []
+        self.norm_then_relu = []
         if self.op_type=='3d':
             layers.append(nn.ConvTranspose3d(in_dim, out_dim, kernel_size=3, stride=2, padding=1, output_padding=1))
         elif self.op_type=='2d':
             layers.append(nn.ConvTranspose2d(in_dim, out_dim, kernel_size=3, stride=2, padding=1, output_padding=1))
-        layers.append(nn.BatchNorm3d(out_dim))
+        layers.append(SimpleDynamicLayerNorm())
         layers.append(nn.LeakyReLU(inplace=True))
         uses_relu = True
         self.norm_then_relu.append(uses_relu)
@@ -107,8 +118,8 @@ class ConvTransposeLayer3d(nn.Module):
                 input = layer(input[:,:,0]) #B, C, T, H, W
                 input = input.unsqueeze(2)
             else:
-                input = layer(input)            
-            isNormLayer = isinstance(layer, nn.BatchNorm3d)
+                input = layer(input)
+            isNormLayer = isinstance(layer, SimpleDynamicLayerNorm)
             # apply linear transform on CONV output
             # (following a normalization, and preceding an output non-linearity)
             if (
@@ -175,7 +186,7 @@ class ConvBlock3d(nn.Module):
             return feats, feats_down
         else:
             return feats_down
-    
+
 
 class CenterConvBlock3d(nn.Module):
     def __init__(
@@ -224,12 +235,12 @@ class CenterConvBlock3d(nn.Module):
 
 class UNet3D(nn.Module):
     def __init__(
-        self, 
-        input_dim, 
-        out_conv, 
-        feats=8, 
-        pad_value=None, 
-        zero_pad=True, 
+        self,
+        input_dim,
+        out_conv,
+        feats=8,
+        pad_value=None,
+        zero_pad=True,
         cond_dim=None,
         op_type='3d', # should be 3d or 2d
     ):
@@ -240,15 +251,15 @@ class UNet3D(nn.Module):
         self.zero_pad = zero_pad
         self.op_type = op_type
         self.encoder1 = ConvBlock3d(
-            in_dim=input_dim, 
-            out_dims=[feats*4,feats*4], 
+            in_dim=input_dim,
+            out_dims=[feats*4,feats*4],
             cond_dim=cond_dim,
             end_pool=self.op_type,
             skip=True
         )
         self.encoder2 = ConvBlock3d(
-            in_dim=feats*4, 
-            out_dims=[feats*8, feats*8], 
+            in_dim=feats*4,
+            out_dims=[feats*8, feats*8],
             cond_dim=cond_dim,
             end_pool=self.op_type,
             skip=True
@@ -298,7 +309,7 @@ class UNet3D(nn.Module):
             pad_mask = (out == self.pad_value).all(dim=-1).all(dim=-1).all(dim=1)  # BxT pad mask
             if self.zero_pad:
                 out[out == self.pad_value] = 0
-        
+
         skip1, feats_down = self.encoder1(out, lead)
         skip2, feats_down = self.encoder2(feats_down, lead)
         center = self.center(feats_down, lead)

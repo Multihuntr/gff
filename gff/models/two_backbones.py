@@ -261,7 +261,7 @@ class ModelBackbones(nn.Module):
                 torch.cat(context_statics_lst, dim=1).unsqueeze(1).repeat((1, N, 1, 1, 1))
             )
             context_lst.append(context_statics)
-        context_inp = torch.cat(context_lst)
+        context_inp = torch.cat(context_lst, dim=2)
         context_embedded = self.context_embed(
             context_inp, batch_positions=batch_positions, lead=lead
         )

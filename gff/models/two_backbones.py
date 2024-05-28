@@ -32,8 +32,8 @@ def get_empty_norms(era5_bands: int, era5l_bands: int, hydroatlas_bands: int):
 
 
 options_metnet = {
-    "dim": 64,
-    "attn_depth": 12,
+    "dim": 32,
+    "attn_depth": 8,
     "attn_dim_head": 64,
     "attn_heads": 16,
     "attn_dropout": 0.1,

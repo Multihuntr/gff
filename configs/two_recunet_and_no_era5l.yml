@@ -1,0 +1,149 @@
+seed: 6426452
+data_folder: ~/NFS_era5/gff
+device: cuda:0
+
+name: two_recunet_and_no_era5l
+
+model: two_backbones
+backbone: recunet_lstm
+hydroatlas_dim: 16
+lead_time_dim: 16
+context_embed_output_dim: 128
+center_crop_context: False
+average_context: False
+
+dataset: forecast_dataset
+fold: 0
+weather_window: 20
+cache_local_in_ram: False
+cache_context_in_ram: True
+data_sources:
+  - era5
+  - s1
+
+n_classes: 2
+batch_size: 16
+lr: 0.001
+lr_decay: 0.8
+epochs: 10
+num_workers: 2
+scalar_freq: 64
+img_freq: 32
+class_weights:
+  - 0.5
+  - 2
+  - 5
+
+hydroatlas_keys:
+  - aet_mm_uyr
+  - ari_ix_uav
+  - cly_pc_uav
+  - cmi_ix_uyr
+  - crp_pc_use
+  - ele_mt_uav
+  - ero_kh_uav
+  - for_pc_use
+  - gdp_ud_usu
+  - gla_pc_use
+  - glc_pc_u01
+  - glc_pc_u02
+  - glc_pc_u03
+  - glc_pc_u04
+  - glc_pc_u05
+  - glc_pc_u06
+  - glc_pc_u07
+  - glc_pc_u08
+  - glc_pc_u09
+  - glc_pc_u10
+  - glc_pc_u11
+  - glc_pc_u12
+  - glc_pc_u13
+  - glc_pc_u14
+  - glc_pc_u15
+  - glc_pc_u16
+  - glc_pc_u17
+  - glc_pc_u18
+  - glc_pc_u19
+  - glc_pc_u20
+  - glc_pc_u21
+  - glc_pc_u22
+  - hft_ix_u09
+  - hft_ix_u93
+  - inu_pc_ult
+  - inu_pc_umn
+  - inu_pc_umx
+  - ire_pc_use
+  - kar_pc_use
+  - lka_pc_use
+  - lkv_mc_usu
+  - nli_ix_uav
+  - pac_pc_use
+  - pet_mm_uyr
+  - pnv_pc_u01
+  - pnv_pc_u02
+  - pnv_pc_u03
+  - pnv_pc_u04
+  - pnv_pc_u05
+  - pnv_pc_u06
+  - pnv_pc_u07
+  - pnv_pc_u08
+  - pnv_pc_u09
+  - pnv_pc_u10
+  - pnv_pc_u11
+  - pnv_pc_u12
+  - pnv_pc_u13
+  - pnv_pc_u14
+  - pnv_pc_u15
+  - pop_ct_usu
+  - ppd_pk_uav
+  - pre_mm_uyr
+  - prm_pc_use
+  - pst_pc_use
+  - rdd_mk_uav
+  - rev_mc_usu
+  - ria_ha_usu
+  - riv_tc_usu
+  - slp_dg_uav
+  - slt_pc_uav
+  - snd_pc_uav
+  - snw_pc_uyr
+  - soc_th_uav
+  - swc_pc_uyr
+  - tmp_dc_uyr
+  - urb_pc_use
+  - wet_pc_u01
+  - wet_pc_u02
+  - wet_pc_u03
+  - wet_pc_u04
+  - wet_pc_u05
+  - wet_pc_u06
+  - wet_pc_u07
+  - wet_pc_u08
+  - wet_pc_u09
+  - wet_pc_ug1
+  - wet_pc_ug2
+era5_keys:
+  - mean_2m_air_temperature
+  - minimum_2m_air_temperature
+  - maximum_2m_air_temperature
+  - dewpoint_2m_temperature
+  - total_precipitation
+  - surface_pressure
+  - mean_sea_level_pressure
+  - u_component_of_wind_10m
+  - v_component_of_wind_10m
+era5_land_keys:
+  - dewpoint_temperature_2m
+  - temperature_2m
+  - volumetric_soil_water_layer_1
+  - volumetric_soil_water_layer_2
+  - volumetric_soil_water_layer_3
+  - volumetric_soil_water_layer_4
+  - surface_net_solar_radiation_sum
+  - surface_net_thermal_radiation_sum
+  - u_component_of_wind_10m
+  - v_component_of_wind_10m
+  - surface_pressure
+  - total_precipitation_sum
+  - snow_depth_water_equivalent
+  - potential_evaporation_sum

@@ -58,6 +58,7 @@ class ModelBackbones(nn.Module):
         hydroatlas_dim=None,
         lead_time_dim=None,
         norms={},
+        w_era5_land=True,
         w_hydroatlas_basin=True,
         w_dem_context=True,
         w_dem_local=False,
@@ -74,6 +75,7 @@ class ModelBackbones(nn.Module):
         self.era5_bands = era5_bands
         self.era5l_bands = era5l_bands
         self.hydroatlas_bands = hydroatlas_bands
+        self.w_era5_land = w_era5_land
         self.w_hydroatlas_basin = w_hydroatlas_basin
         self.w_dem_context = w_dem_context
         self.w_dem_local = w_dem_local
@@ -104,7 +106,9 @@ class ModelBackbones(nn.Module):
         ), "If you provide s1, you must also provide lead_time_dim. If not, you shouldn't."
 
         # Determine context embedding sizes
-        self.n_weather = len(era5_bands) + len(era5l_bands)
+        self.n_weather = len(era5_bands)
+        if self.w_era5_land:
+            self.n_weather += len(era5l_bands)
         self.n_hydroatlas = len(hydroatlas_bands)
         context_embed_input_dim = self.n_weather
         if self.w_hydroatlas_basin:
@@ -234,7 +238,7 @@ class ModelBackbones(nn.Module):
         dem_local_inp = nans_to_zero(dem_local_inp)
         hand_inp = nans_to_zero(hand_inp)
 
-        # Get Lead time embedding indexes
+        # Get Lead time embeddings
         if self.w_s1:
             lead_idx = self.get_lead_time_idx(ex["s1_lead_days"])
             lead = self.lead_time_embedding(lead_idx)
@@ -249,13 +253,15 @@ class ModelBackbones(nn.Module):
         if self.w_dem_context:
             context_statics_lst.append(dem_context_inp)
         # Add the statics in at every step
+        context_lst = [era5_inp]
+        if self.w_era5_land:
+            context_lst.insert(0, era5l_inp)
         if self.w_hydroatlas_basin or self.w_dem_context:
             context_statics = (
                 torch.cat(context_statics_lst, dim=1).unsqueeze(1).repeat((1, N, 1, 1, 1))
             )
-            context_inp = torch.cat([era5l_inp, era5_inp, context_statics], dim=2)
-        else:
-            context_inp = torch.cat([era5l_inp, era5_inp], dim=2)
+            context_lst.append(context_statics)
+        context_inp = torch.cat(context_lst)
         context_embedded = self.context_embed(
             context_inp, batch_positions=batch_positions, lead=lead
         )
@@ -283,7 +289,7 @@ class ModelBackbones(nn.Module):
         if self.w_hand:
             local_lst.append(hand_inp)
         local_inp = torch.cat(local_lst, dim=1)
-        # Pretend it's temporal data with one time step for utae
+        # Pretend it's temporal data with one time step
         local_inp = local_inp[:, None]
         out = self.local_embed(local_inp, batch_positions=batch_positions[:, :1], lead=lead)
         if self.backbone != "3dunet":

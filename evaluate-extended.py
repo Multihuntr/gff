@@ -164,7 +164,7 @@ def main(args):
         ks_fnames, out_path, targ_path, n_cls, extra_processing=blockout, device=args.device
     )
     gff.evaluation.save_results(args.model_folder / "eval_results_ks.yml", eval_results)
-    gff.evaluation.save_cm(test_cm, n_cls, "Test", args.model_folder / "test_cm.png")
+    gff.evaluation.save_cm(test_cm, n_cls, "Test", args.model_folder / "test_cm_ks.png")
 
 
 if __name__ == "__main__":

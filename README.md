@@ -1,142 +1,42 @@
-# Global compound floods
+# Global Flood Forecasting (GFF)
 
-A globally distributed dataset for learning flood forecasting. *
+![GFF global map](./gff_map.png)
 
-<sub>* = Initially, it a project to identify and describe compound flood events globally. In particular, Fluvial (riverine) + Storm surge (coastal) flood contributions in areas with no in-situ measurements.</sub>
+A globally distributed dataset for learning flood forecasting featuring both generated and labelled flood maps.
 
-# Environment setup
+Download here: TODO
 
-We use both conda and docker because SNAP needs a different version of python.
+# This repository
+
+Provides code to:
+
+1. **Use GFF**: Train and evaluate models on GFF dataset.
+2. **Generate data**: Generate GFF-like data from original sources.
+
+## Use GFF
+
+To simply train and evaluate models on GFF, just build the conda environment. E.g.
 
 ```python
 conda env create -p envs/flood --file environment.yml
-pushd preprocessing ; docker build -t esa-snappy . ; popd
 ```
 
-# Data
+And run `train.py` or `evaluate.py`. Look in `configs/*` for how to provide configuration options. E.g.:
 
-Download:
-
-1. HydroATLAS (HydroBASIN and HydroRIVER)
-2. Caravan + GRDC extension
-
-# Data sources
-
-This project builds on many amazing existing datasets and models to achieve its various purposes.
-
-Purposes
-* P1. Find list of plausible compound flood events (river + storm surge)
-* P2. Run google river gauge estimation model
-* P3. Post-event flood maps
-* P4. Forecast flood maps
-* P5. Measure accuracy of water level predictions
-
-All data is publicly available, but some need an account to download. Here is the full list of data sources and where to download them.
-
-## Data
-
-Population Map (UNUSED)
-* WorldPop - Top-down unconstrained Global mosaic 1km
-* Source: https://hub.worldpop.org/geodata/summary?id=24777 (Accessed 17/01/2024)
-* More detail: https://www.worldpop.org/methods/top_down_constrained_vs_unconstrained/
-* Size: 1GB
-* Purpose: P1
-
-River/Basin geometries and parameters
-* HydroATLAS - RiverATLAS and BasinATLAS
-* Source: https://www.hydrosheds.org/hydroatlas (Accessed 12/01/2024)
-* Size: 22GB
-* Purpose: P1, P2
-
-Global past flood events
-* Dartmouth Flood Observatory
-* Source: https://floodobservatory.colorado.edu/temp/ (Accessed 12/01/2024)
-* Size: 0.005GB
-* Purpose: P1
-
-River gauge/discharge data
-* Caravan v1.3
-* Source: https://zenodo.org/records/7944025 (Accessed ??/01/2024)
-* Size: 15GB
-* Purpose: P2, P3, P5
-```bash
-# IMPORTANT: Also download grdc
-# (This snippet assumes you are one folder above the root of the Caravan dataset,
-#  and downloads/adds the GRDC extension into it)
-wget -O grdc.tar.gz "https://zenodo.org/records/10074416/files/caravan-grdc-extension-nc.tar.gz?download=1"
-tar -xf grdc.tar.gz
-mv GRDC-Caravan-extension-nc/timeseries/netcdf/grdc Caravan/timeseries/netcdf/GRDC
-mv GRDC-Caravan-extension-nc/attributes/grdc Caravan/attributes/GRDC
-mv GRDC-Caravan-extension-nc/shapefiles/grdc Caravan/shapefiles/GRDC
+```python
+python train.py configs/two_recunet.yml -o data_folder=path/to/gff
 ```
 
-Coastal gauge data (UNUSED)
-* GESLA-3
-* Source: https://gesla787883612.wordpress.com/
-* Size: 38GB
-* Purpose: P5
+Will create a `./runs` folder, and save a model into it.
 
-Global storm surge predictions (UNUSED)
-* Source:
-    - GTSM (https://cds.climate.copernicus.eu/cdsapp#!/dataset/sis-water-level-change-timeseries-cmip6?tab=overview)
-    - See `scripts/dl-gtsm.py`
-* Size: 840MB
-* Purpose: P4
+## Generate new data
 
-Global DEM
-* Source:
-    - SRTM 3s DEM https://download.esa.int/step/auxdata/dem/SRTM90/tiff
-    - CopDEM 30m https://prism-dem-open.copernicus.eu/pd-desk-open-access/prismDownload
-* Size: ~ as needed
-* Purpose: P4
+To generate new data using GFF's methodology/code, see `./HOWTO-GENERATE.md`
 
-Global weather parameters (ERA5-Land)
-* Source:
-    - https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-single-levels?tab=overview
-    - See `scripts/dl-era5-land.py`
-* Size:
-* Purpose: P2, P3
+# Cite
 
-Hand-labelled flood maps (WONTDO: Kuro Siwo casts doubt on applicability, and isn't global)
-* Copernicus Emergency Mapping Service
-* Source: [Archives][5] and API
-* Size:
-* Purpose: P3
+To cite us, use:
 
-Local Satellite Images (TODO: After specific test sites determine)
-* Sentinel-1 images
-* Source: Alaska Satellite Facility (through `asf_search`)
-* Size: 1000GB
-* Purpose: P3
-
-### Statistics
-
-Datasets used to calculate upstream country/continent stats. i.e. Stats not based on our data. e.g. How many floods per country?
-
-DRMKC - INFORM
-* Source: https://drmkc.jrc.ec.europa.eu/inform-index/Portals/0/InfoRM/2024/INFORM_Risk_2024_v067.xlsx
-
-World Administrative boundaries
-* Source: https://public.opendatasoft.com/api/explore/v2.1/catalog/datasets/world-administrative-boundaries/exports/fgb?lang=en
-
-## Models
-Flood maps from Sentinel-1
-* Kuro Siwo - FloodViT
-* Source: https://github.com/Orion-AI-Lab/KuroSiwo (Accessed 15/01/2024)
-* Purpose: P3
-
-River gauge estimation
-* Google LSTM (https://g.co/floodhub and https://hess.copernicus.org/articles/26/4013/2022/)
-* Source: https://zenodo.org/records/10397664
-* Purpose: P2
-
-
-# Sentinel-1 preprocessing
-
-Sentinel-1 preprocessing uses SNAP in a dockerfile. Perhaps it should use a locally installed SNAP instead.
-
-[1]: https://g.co/floodhub
-[2]: https://hess.copernicus.org/articles/26/4013/2022/
-[3]: https://journals.ametsoc.org/view/journals/clim/34/20/JCLI-D-21-0050.1.xml
-[4]: https://github.com/Orion-AI-Lab/KuroSiwo
-[5]: https://emergency.copernicus.eu/mapping/list-of-activations-rapid
+```
+TBD
+```

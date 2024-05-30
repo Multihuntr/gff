@@ -159,8 +159,12 @@ def make_metrics(n_classes, device):
         "overall_cm": MulticlassConfusionMatrix(
             n_classes, ignore_index=-100, normalize="true", validate_args=False
         ).to(device),
-        "coast": MulticlassF1Score(n_classes, ignore_index=-100, validate_args=False).to(device),
-        "inland": MulticlassF1Score(n_classes, ignore_index=-100, validate_args=False).to(device),
+        "coast": MulticlassF1Score(
+            n_classes, average="none", ignore_index=-100, validate_args=False
+        ).to(device),
+        "inland": MulticlassF1Score(
+            n_classes, average="none", ignore_index=-100, validate_args=False
+        ).to(device),
         "coast_count": 0,
     }
 
@@ -197,6 +201,8 @@ def compute_metrics(m, overall_count):
             "clim_zone": {
                 k: tuple(f1v.item() for f1v in v.compute()) for k, v in m["clim_zone_f1"].items()
             },
+            "coast": tuple(f1v.item() for f1v in m["coast"].compute()),
+            "inland": tuple(f1v.item() for f1v in m["inland"].compute()),
         },
         "tilewise_mse": m["tilewise_mse"].compute().item(),
         "counts": {

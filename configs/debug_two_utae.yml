@@ -12,6 +12,7 @@ context_embed_output_dim: 128
 weather_window: 20
 center_crop_context: False
 average_context: False
+derive_land_sea_from_dem: False
 
 dataset: debug_dataset
 fold: 0

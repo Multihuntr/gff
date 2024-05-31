@@ -2,10 +2,10 @@ seed: 6426452
 data_folder: ~/NFS_era5/gff
 device: cuda:0
 
-name: two_3dunet
+name: two_recunet_and_no_era5l
 
 model: two_backbones
-backbone: 3dunet
+backbone: recunet_lstm
 hydroatlas_dim: 16
 lead_time_dim: 16
 context_embed_output_dim: 128
@@ -19,12 +19,7 @@ weather_window: 20
 cache_local_in_ram: False
 cache_context_in_ram: True
 data_sources:
-  - era5
   - era5_land
-  - hydroatlas_basin
-  - dem_context
-  - dem_local
-  - hand
   - s1
 
 n_classes: 2

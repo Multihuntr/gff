@@ -58,12 +58,14 @@ class ModelBackbones(nn.Module):
         hydroatlas_dim=None,
         lead_time_dim=None,
         norms={},
+        w_era5=True,
         w_era5_land=True,
         w_hydroatlas_basin=True,
         w_dem_context=True,
         w_dem_local=False,
         w_hand=True,
         w_s1=True,
+        derive_land_sea_from_dem=False,
         n_predict=3,
         weather_window_size=20,
         context_embed_output_dim=5,
@@ -75,12 +77,14 @@ class ModelBackbones(nn.Module):
         self.era5_bands = era5_bands
         self.era5l_bands = era5l_bands
         self.hydroatlas_bands = hydroatlas_bands
+        self.w_era5 = w_era5
         self.w_era5_land = w_era5_land
         self.w_hydroatlas_basin = w_hydroatlas_basin
         self.w_dem_context = w_dem_context
         self.w_dem_local = w_dem_local
         self.w_hand = w_hand
         self.w_s1 = w_s1
+        self.derive_land_sea_from_dem = derive_land_sea_from_dem
         self.n_predict = n_predict
         self.weather_window_size = weather_window_size
         self.center_crop_context = center_crop_context
@@ -101,28 +105,37 @@ class ModelBackbones(nn.Module):
         assert (
             self.w_s1 or self.w_dem_local or self.w_hand
         ), "Must provide one of s1, dem local or hand to produce local scale predictions"
+        assert (
+            self.w_era5 or self.w_era5_land or self.w_hydroatlas_basin or self.w_dem_context
+        ), "Must provide one of era5, era5-land, dem context or hydroatlas to produce context scale predictions"
         assert (self.w_s1 and (lead_time_dim is not None)) or (
             (not self.w_s1) and (lead_time_dim is None)
         ), "If you provide s1, you must also provide lead_time_dim. If not, you shouldn't."
 
         # Determine context embedding sizes
-        self.n_weather = len(era5_bands)
+        self.n_weather = 0
+        if self.w_era5:
+            self.n_weather += len(era5_bands)
         if self.w_era5_land:
             self.n_weather += len(era5l_bands)
-        self.n_hydroatlas = len(hydroatlas_bands)
         context_embed_input_dim = self.n_weather
         if self.w_hydroatlas_basin:
+            self.n_hydroatlas = len(hydroatlas_bands)
             self.hydro_atlas_embed = nn.Conv2d(
                 self.n_hydroatlas, hydroatlas_dim, kernel_size=3, padding=1
             )
             context_embed_input_dim += hydroatlas_dim
         if self.w_dem_context:
             context_embed_input_dim += 1
+            if self.derive_land_sea_from_dem:
+                context_embed_input_dim += 1
 
         # Determine local sizes
         local_input_dim = context_embed_output_dim
         if self.w_dem_local:
             local_input_dim += 1
+            if self.derive_land_sea_from_dem:
+                local_input_dim += 1
         if self.w_hand:
             local_input_dim += 1
         if self.w_s1:
@@ -213,9 +226,18 @@ class ModelBackbones(nn.Module):
         lead_copy[lead > self.len_lead] = self.len_lead - 1
         return lead_copy
 
+    def derive_landsea(self, dem):
+        if dem is not None:
+            return ~torch.isnan(dem)
+        else:
+            return None
+
     def forward(self, ex):
-        B, N, cC, cH, cW = ex["era5"].shape
-        batch_positions = torch.arange(0, N).reshape((1, N)).repeat((B, 1)).to(ex["era5"].device)
+        context_exemplar = "era5" if self.w_era5 else "era5_land"
+        B, N, cC, cH, cW = ex[context_exemplar].shape
+        batch_positions = (
+            torch.arange(0, N).reshape((1, N)).repeat((B, 1)).to(ex[context_exemplar].device)
+        )
         if self.w_s1:
             example_local = ex["s1"]
         else:
@@ -227,7 +249,9 @@ class ModelBackbones(nn.Module):
         era5l_inp = self.normalise(ex, "era5_land")
         hydroatlas_inp = self.normalise(ex, "hydroatlas_basin")
         dem_context_inp = self.normalise(ex, "dem", "context")
+        derived_landsea_context = self.derive_landsea(dem_context_inp)
         dem_local_inp = self.normalise(ex, "dem", "local")
+        derived_landsea_local = self.derive_landsea(dem_local_inp)
         hand_inp = self.normalise(ex, "hand")
         s1_inp = self.normalise(ex, "s1")
 
@@ -252,10 +276,14 @@ class ModelBackbones(nn.Module):
             context_statics_lst.append(embedded_hydro_atlas_raster)
         if self.w_dem_context:
             context_statics_lst.append(dem_context_inp)
+            if self.derive_land_sea_from_dem:
+                context_statics_lst.append(derived_landsea_context)
         # Add the statics in at every step
-        context_lst = [era5_inp]
+        context_lst = []
         if self.w_era5_land:
-            context_lst.insert(0, era5l_inp)
+            context_lst.append(era5l_inp)
+        if self.w_era5:
+            context_lst.append(era5_inp)
         if self.w_hydroatlas_basin or self.w_dem_context:
             context_statics = (
                 torch.cat(context_statics_lst, dim=1).unsqueeze(1).repeat((1, N, 1, 1, 1))
@@ -286,6 +314,8 @@ class ModelBackbones(nn.Module):
             local_lst.append(s1_inp)
         if self.w_dem_local:
             local_lst.append(dem_local_inp)
+            if self.derive_land_sea_from_dem:
+                local_lst.append(derived_landsea_local)
         if self.w_hand:
             local_lst.append(hand_inp)
         local_inp = torch.cat(local_lst, dim=1)

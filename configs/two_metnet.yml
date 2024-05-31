@@ -11,6 +11,7 @@ lead_time_dim: 16
 context_embed_output_dim: 128
 center_crop_context: False
 average_context: False
+derive_land_sea_from_dem: False
 
 dataset: forecast_dataset
 fold: 0

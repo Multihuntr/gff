@@ -62,7 +62,7 @@ def flatten_classes(n_classes, pred_tile, targ_tile, *args, **kwargs):
 def processing_blockout_fnc(cache_folder, block):
     def blockout_inner(n_classes, pred_tile, targ_tile, fmap_fname, window):
         if n_classes == 2 and block == "kurosiwo-pw":
-            mask = targ_tile == 2
+            mask = targ_tile == gff.constants.KUROSIWO_PW_CLASS
             pred_tile[mask] = -100
             targ_tile[mask] = -100
         elif n_classes == 2 and block == "worldcover-water":

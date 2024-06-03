@@ -136,7 +136,7 @@ def main(args):
     n_cls = C["n_classes"]
 
     # Base results
-    coast_masks_fname = Path("/tmp") / f'coast_masks_{C["fold"]}.npy'
+    coast_masks_fname = Path("/tmp") / f'coast_masks_{C["fold"]}_{args.coast_buffer}.npy'
     if not coast_masks_fname.exists():
         coast_masks = get_coast_masks(targ_path, fnames, basins_df, world_coast, args.coast_buffer)
         torch.save(coast_masks, coast_masks_fname)

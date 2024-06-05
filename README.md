@@ -4,7 +4,7 @@
 
 A globally distributed dataset for learning flood forecasting featuring both generated and labelled flood maps.
 
-Download here: TODO
+Download here: [Zenodo](https://zenodo.org/records/11380970)
 
 # This repository
 

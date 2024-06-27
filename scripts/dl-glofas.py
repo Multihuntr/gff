@@ -101,7 +101,7 @@ def main(args):
 
             # Combine all the netcdf files into a single one to save on extra indexes
             ds = xarray.open_mfdataset(
-                scratch_path / f"{id}_*.nc", concat_dim="time", combine="nested"
+                str(scratch_path / f"{id}_*.nc"), concat_dim="time", combine="nested"
             ).load()
             ds.sortby(ds.time).to_netcdf(args.data_path / f"{id}_{str(date).split(' ')[0]}.nc")
 

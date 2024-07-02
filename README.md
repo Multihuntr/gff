@@ -40,3 +40,7 @@ To cite us, use:
 ```
 TBD
 ```
+
+# Acknowledgements
+
+This project was initiated at [Φ-lab](https://philab.esa.int/) at ESRIN, when @Multihuntr (Brandon Victor) temporarily joined as a visiting researcher. Thanks to [SmartSatCRC](https://smartsatcrc.com/) for funding the visit, and to Φ-lab for hosting the visit.

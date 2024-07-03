@@ -74,9 +74,10 @@ def main(args):
         id = row.key
         date = convert(row.date)
         area = row.geometry
+        out_path = glofas_path / f"{id}_{str(date).split(' ')[0]}.nc"
 
         # skip existing files
-        if os.path.isfile(args.data_path / f"{id}.nc"):
+        if os.path.isfile(out_path):
             print(f"Data for sample ID {id} already exists. Skipping.")
             continue
 
@@ -103,7 +104,7 @@ def main(args):
             ds = xarray.open_mfdataset(
                 str(scratch_path / f"{id}_*.nc"), concat_dim="time", combine="nested"
             ).load()
-            ds.sortby(ds.time).to_netcdf(args.data_path / f"{id}_{str(date).split(' ')[0]}.nc")
+            ds.sortby(ds.time).to_netcdf(out_path)
 
             # Cleanup
             for old_file in scratch_path.glob(f"{id}_*.nc"):

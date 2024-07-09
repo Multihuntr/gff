@@ -40,6 +40,10 @@ class_weights:
   - 2
   - 5
 
+glofas_keys:
+  - dis24
+  - rowe
+  - swir
 hydroatlas_keys:
   - aet_mm_uyr
   - ari_ix_uav

@@ -8,15 +8,23 @@ def get_norms(C):
     norms = {}
     data_folder = Path(C["data_folder"])
 
-    era5_norm = gff.normalisation.get_era5_norm(data_folder, C["era5_keys"])
-    era5_mean = torch.tensor(era5_norm["mean"].values).reshape((1, 1, -1, 1, 1))
-    era5_std = torch.tensor(era5_norm["std"].values).reshape((1, 1, -1, 1, 1))
-    norms["era5"] = (era5_mean, era5_std)
+    if "era5" in C["data_sources"]:
+        era5_norm = gff.normalisation.get_era5_norm(data_folder, C["era5_keys"])
+        era5_mean = torch.tensor(era5_norm["mean"].values).reshape((1, 1, -1, 1, 1))
+        era5_std = torch.tensor(era5_norm["std"].values).reshape((1, 1, -1, 1, 1))
+        norms["era5"] = (era5_mean, era5_std)
 
-    era5l_norm = gff.normalisation.get_era5_land_norm(data_folder, C["era5_land_keys"])
-    era5l_mean = torch.tensor(era5l_norm["mean"].values).reshape((1, 1, -1, 1, 1))
-    era5l_std = torch.tensor(era5l_norm["std"].values).reshape((1, 1, -1, 1, 1))
-    norms["era5_land"] = (era5l_mean, era5l_std)
+    if "era5_land" in C["data_sources"]:
+        era5l_norm = gff.normalisation.get_era5_land_norm(data_folder, C["era5_land_keys"])
+        era5l_mean = torch.tensor(era5l_norm["mean"].values).reshape((1, 1, -1, 1, 1))
+        era5l_std = torch.tensor(era5l_norm["std"].values).reshape((1, 1, -1, 1, 1))
+        norms["era5_land"] = (era5l_mean, era5l_std)
+
+    if "glofas" in C["data_sources"]:
+        glofas_norm = gff.normalisation.get_glofas_norm(data_folder, C["fold"], C["glofas_keys"])
+        glofas_mean = torch.tensor(glofas_norm["mean"].values).reshape((1, 1, -1, 1, 1))
+        glofas_std = torch.tensor(glofas_norm["std"].values).reshape((1, 1, -1, 1, 1))
+        norms["glofas"] = (glofas_mean, glofas_std)
 
     if "hydroatlas_basin" in C["data_sources"]:
         hydroatlas_norm = gff.normalisation.get_hydroatlas_norm(data_folder, C["hydroatlas_keys"])
@@ -61,12 +69,14 @@ def create(C):
         return two_backbones.ModelBackbones(
             C["era5_keys"],
             C["era5_land_keys"],
+            C["glofas_keys"],
             C["hydroatlas_keys"],
             C["hydroatlas_dim"],
             C["lead_time_dim"],
             norms=norms,
             w_era5=("era5" in C["data_sources"]),
             w_era5_land=("era5_land" in C["data_sources"]),
+            w_glofas=("glofas" in C["data_sources"]),
             w_hydroatlas_basin=("hydroatlas_basin" in C["data_sources"]),
             w_dem_context=("dem_context" in C["data_sources"]),
             w_dem_local=("dem_local" in C["data_sources"]),

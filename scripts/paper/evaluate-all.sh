@@ -6,7 +6,7 @@ export TQDM_DISABLE="True"
 export DATA_FOLDER="~/data/gff-export"
 
 function run_eval {
-    python evaluate-extended.py paperruns/$1 ~/data/gff-export/worldcover ~/NFS_era5/HydroATLAS --device cuda:1 --blockout_worldcover_water --blockout_ks_pw -o data_folder=$DATA_FOLDER &
+    python evaluate-extended.py paperruns/$1 ~/data/gff-export/worldcover ~/NFS_era5/HydroATLAS --device cuda:1 --blockout_worldcover_water --blockout_ks_pw --coast_buffer 0.1 -o data_folder=$DATA_FOLDER &
     echo "Running $1..."
 }
 

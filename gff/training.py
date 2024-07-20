@@ -1,8 +1,12 @@
+import random
+
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.utils.tensorboard
+import torchvision
+import torchvision.transforms.v2
 import torchmetrics
 import torchmetrics.classification
 import tqdm
@@ -98,9 +102,54 @@ class CustomWriter:
         self.writer.add_scalar("F1/train_batch", avg_f1, self.count)
 
 
+class DeterministicCrossEntropyLoss:
+    # https://discuss.pytorch.org/t/pytorchs-non-deterministic-cross-entropy-loss-and-the-problem-of-reproducibility/172180/9
+    def __init__(self, *, reduction="mean", **kwargs):
+        self.crit = nn.CrossEntropyLoss(reduction="none", **kwargs)
+        self.reduction = reduction
+        self.kwargs = kwargs
+
+    def __call__(self, pred, targ):
+        loss = self.crit(pred, targ)
+        if self.reduction == "mean":
+            loss = loss[loss != self.kwargs["ignore_index"]].mean()
+        elif self.reduction != "none":
+            raise NotImplementedError()
+        return loss
+
+    def to(self, device):
+        self.crit = self.crit.to(device)
+        return self
+
+
+def make_augmentation(C):
+    if "blur" in C["augments"]:
+        blur_op = torchvision.transforms.v2.GaussianBlur(3).to(C["device"])
+
+    def do_augment(example):
+        r = {**example}
+        if "gaussian_noise" in C["augments"]:
+            for k in C["data_sources"]:
+                r[k] = r[k] + torch.randn(r[k].shape, device=r[k].device) * r[k].max() * 0.001
+        if "blur" in C["augments"]:
+            if random.random() < 0.3:
+                for k in C["data_sources"]:
+                    r[k] = blur_op(r[k])
+        if "hflip" in C["augments"]:
+            if random.random() < 0.1:
+                for k in C["data_sources"]:
+                    r[k] = torchvision.transforms.v2.functional.horizontal_flip(r[k])
+                r["floodmap"] = torchvision.transforms.v2.functional.horizontal_flip(r["floodmap"])
+                r["hflipped"] = True
+        return r
+
+    return do_augment
+
+
 def train_epoch(
     model: nn.Module,
     dataloader,
+    augmentation,
     criterion,
     n_classes: int,
     optim: torch.optim.Optimizer,
@@ -127,6 +176,7 @@ def train_epoch(
     pbar = tqdm.tqdm(dataloader, desc="Training", leave=False)
     for i, example_cpu in enumerate(pbar):
         example = gff.util.recursive_todevice(example_cpu, device)
+        example = augmentation(example)
         targ = example.pop("floodmap")
         pred = model(example)
 
@@ -196,7 +246,8 @@ def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=Non
         scheduler.load_state_dict(checkpoint["scheduler"])
         start_epoch = checkpoint["epoch"]
     cls_weight = torch.tensor(C.get("class_weights", (1.0,) * 3))[: C["n_classes"]]
-    criterion = nn.CrossEntropyLoss(weight=cls_weight, ignore_index=-100)
+    criterion = DeterministicCrossEntropyLoss(weight=cls_weight, ignore_index=-100)
+    augment = make_augmentation(C)
 
     writer = torch.utils.tensorboard.SummaryWriter(model_folder)
     custom_writer = CustomWriter(writer)
@@ -221,6 +272,7 @@ def training_loop(C, model_folder, model: nn.Module, dataloaders, checkpoint=Non
             train_loss, train_f1s, train_cm = train_epoch(
                 model,
                 train_dl,
+                augment,
                 criterion,
                 C["n_classes"],
                 optim,

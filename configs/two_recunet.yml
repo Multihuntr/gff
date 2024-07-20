@@ -40,6 +40,10 @@ class_weights:
   - 0.5
   - 2
   - 5
+augments:
+  - blur
+  - gaussian_noise
+  - hflip
 
 glofas_keys:
   - dis24

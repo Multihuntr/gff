@@ -34,6 +34,10 @@ class_weights:
   - 0.5
   - 2
   - 5
+augments:
+  - blur
+  - gaussian_noise
+  - hflip
 
 hydroatlas_keys:
   - aet_mm_uyr

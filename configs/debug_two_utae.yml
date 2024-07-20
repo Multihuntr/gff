@@ -36,6 +36,10 @@ epochs: 200
 num_workers: 0
 scalar_freq: 2
 img_freq: 2
+augments:
+  - blur
+  - gaussian_noise
+  - hflip
 
 hydroatlas_keys:
   - aet_mm_uyr

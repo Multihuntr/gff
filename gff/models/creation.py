@@ -89,6 +89,8 @@ def create(C):
             center_crop_context=C["center_crop_context"],
             average_context=C["average_context"],
             backbone=C["backbone"],
+            normalise_using_batch=C["normalise_using_batch"],
+            cond_norm_affine=C["cond_norm_affine"],
         )
     else:
         raise NotImplementedError("Not a valid model name")

@@ -13,6 +13,8 @@ weather_window: 20
 center_crop_context: False
 average_context: False
 derive_land_sea_from_dem: False
+cond_norm_affine: null
+normalise_using_batch: False
 
 dataset: debug_dataset
 fold: 0

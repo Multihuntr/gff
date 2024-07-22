@@ -12,6 +12,8 @@ context_embed_output_dim: 128
 center_crop_context: False
 average_context: False
 derive_land_sea_from_dem: False
+cond_norm_affine: null
+normalise_using_batch: False
 
 dataset: forecast_dataset
 fold: 0
@@ -21,7 +23,6 @@ cache_context_in_ram: True
 data_sources:
   - era5
   - era5_land
-  - glofas
   - hydroatlas_basin
   - dem_context
   - dem_local

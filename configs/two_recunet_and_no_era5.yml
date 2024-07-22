@@ -12,6 +12,8 @@ context_embed_output_dim: 128
 center_crop_context: False
 average_context: False
 derive_land_sea_from_dem: False
+cond_norm_affine: null
+normalise_using_batch: False
 
 dataset: forecast_dataset
 fold: 0
@@ -39,6 +41,10 @@ augments:
   - gaussian_noise
   - hflip
 
+glofas_keys:
+  - dis24
+  - rowe
+  - swir
 hydroatlas_keys:
   - aet_mm_uyr
   - ari_ix_uav

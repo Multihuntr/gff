@@ -29,23 +29,23 @@ def parse_args(argv):
         help="Folder containing exported WorldCover files, one per ROI",
     )
     parser.add_argument("hydroatlas_path", type=Path)
-    parser.add_argument(
-        "--blockout_ks_pw",
-        action="store_true",
-        help="When evaluating Kuro Siwo Labels, don't consider permanent water",
-    )
-    parser.add_argument(
-        "--blockout_worldcover_water",
-        action="store_true",
-        help="For main evaluation, don't consider pixels in WorldCover water class",
-    )
+    # parser.add_argument(
+    #     "--blockout_ks_pw",
+    #     action="store_true",
+    #     help="When evaluating Kuro Siwo Labels, don't consider permanent water",
+    # )
+    # parser.add_argument(
+    #     "--blockout_worldcover_water",
+    #     action="store_true",
+    #     help="For main evaluation, don't consider pixels in WorldCover water class",
+    # )
     parser.add_argument(
         "--device",
         type=str,
         default="cpu",
         help="evaluating on GPU device is much faster with torchmetrics",
     )
-    parser.add_argument("--coast_buffer", type=float, default=0.3)
+    parser.add_argument("--coast_buffer", type=float, default=0.1)
     parser.add_argument(
         "--overwrite",
         "-o",
@@ -142,8 +142,7 @@ def main(args):
         torch.save(coast_masks, coast_masks_fname)
     coast_masks = torch.load(coast_masks_fname)
 
-    blockout_name = "worldcover-water" if args.blockout_worldcover_water else None
-    blockout = gff.evaluation.processing_blockout_fnc(args.worldcover_path, blockout_name)
+    blockout = gff.evaluation.processing_blockout_fnc(args.worldcover_path, "worldcover-water")
     eval_results, test_cm = gff.evaluation.evaluate_floodmaps(
         fnames,
         out_path,
@@ -157,8 +156,7 @@ def main(args):
     gff.evaluation.save_cm(test_cm, n_cls, "Test", args.model_folder / "test_cm.png")
 
     # On KuroSiwo labels
-    blockout_name = "kurosiwo-pw" if args.blockout_ks_pw else None
-    blockout = gff.evaluation.processing_blockout_fnc(None, blockout_name)
+    blockout = gff.evaluation.processing_blockout_fnc(None, "kurosiwo-pw")
     ks_fnames = [fname for fname in fnames if fname_is_ks(fname)]
     eval_results, test_cm = gff.evaluation.evaluate_floodmaps(
         ks_fnames, out_path, targ_path, n_cls, extra_processing=blockout, device=args.device

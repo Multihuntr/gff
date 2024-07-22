@@ -1,3 +1,5 @@
+import warnings
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -78,6 +80,8 @@ class ModelBackbones(nn.Module):
         center_crop_context=True,
         average_context=True,
         backbone="utae",
+        normalise_using_batch=False,
+        cond_norm_affine=None,
     ):
         super().__init__()
         self.era5_bands = era5_bands
@@ -98,6 +102,10 @@ class ModelBackbones(nn.Module):
         self.center_crop_context = center_crop_context
         self.average_context = average_context
         self.backbone = backbone
+        self.normalise_using_batch = normalise_using_batch
+        self.hydroatlas_class_mask = [
+            (band.split("_")[1] in ["cl", "id"]) for band in self.hydroatlas_bands
+        ]
 
         # Store normalisation info on model
         # (To load model weights, the shapes must be identical; so use empty if not known at init)
@@ -164,6 +172,7 @@ class ModelBackbones(nn.Module):
                 out_conv=[context_embed_output_dim],
                 cond_dim=lead_time_dim,
                 temp_encoding="ltae",
+                cond_norm_affine=cond_norm_affine,
             )
             self.local_embed = utae.UTAE(
                 local_input_dim,
@@ -172,6 +181,7 @@ class ModelBackbones(nn.Module):
                 out_conv=[64, n_predict],
                 cond_dim=lead_time_dim,
                 temp_encoding="ltae",
+                cond_norm_affine=cond_norm_affine,
             )
         elif backbone == "recunet_lstm":
             self.context_embed = utae.UTAE(
@@ -181,6 +191,7 @@ class ModelBackbones(nn.Module):
                 out_conv=[context_embed_output_dim],
                 cond_dim=lead_time_dim,
                 temp_encoding="lstm",
+                cond_norm_affine=cond_norm_affine,
             )
             self.local_embed = utae.UTAE(
                 local_input_dim,
@@ -189,15 +200,17 @@ class ModelBackbones(nn.Module):
                 out_conv=[64, n_predict],
                 cond_dim=lead_time_dim,
                 temp_encoding="lstm",
+                cond_norm_affine=cond_norm_affine,
             )
         elif backbone == "metnet":
-            options_metnet["dim_in"] = weather_window_size * context_embed_input_dim
             options_metnet["lead_time_embed_dim"] = lead_time_dim
+            options_metnet["cond_norm_affine"] = cond_norm_affine
+
+            options_metnet["dim_in"] = weather_window_size * context_embed_input_dim
             options_metnet["out_conv"] = context_embed_output_dim
             self.context_embed = metnet.MetNet3(**options_metnet)
 
             options_metnet["dim_in"] = 1 * local_input_dim
-            options_metnet["lead_time_embed_dim"] = lead_time_dim
             options_metnet["out_conv"] = n_predict
             self.local_embed = metnet.MetNet3(**options_metnet)
         elif backbone == "3dunet":
@@ -206,12 +219,14 @@ class ModelBackbones(nn.Module):
                 out_conv=context_embed_output_dim,
                 cond_dim=lead_time_dim,
                 op_type="3d",
+                cond_norm_affine=cond_norm_affine,
             )
             self.local_embed = unet3d.UNet3D(
                 input_dim=local_input_dim,
                 out_conv=n_predict,
                 cond_dim=lead_time_dim,
                 op_type="2d",
+                cond_norm_affine=cond_norm_affine,
             )
         else:
             raise NotImplementedError(f"Unknown model name: {backbone}")
@@ -223,9 +238,22 @@ class ModelBackbones(nn.Module):
             ex_key = key
         if ex_key in ex:
             data = ex[ex_key]
-            km = f"{key}_mean"
-            ks = f"{key}_std"
-            data = (data - getattr(self, km)) / getattr(self, ks)
+            if self.normalise_using_batch:
+                # Different normalisation stats per channel,
+                # but channel is in a different position for different data
+                if len(data.shape) == 5:
+                    dims = (0, 1, 3, 4)
+                else:
+                    dims = (0, 2, 3)
+                mean = data.mean(dim=dims, keepdim=True)
+                std = data.std(dim=dims, keepdim=True)
+                if key == "hydroatlas_basin":
+                    mean[:, self.hydroatlas_class_mask] = 0
+                    std[:, self.hydroatlas_class_mask] = 1
+            else:
+                mean = getattr(self, f"{key}_mean")
+                std = getattr(self, f"{key}_std")
+            data = (data - mean) / std
             return data
 
     def get_lead_time_idx(self, lead):
@@ -247,6 +275,11 @@ class ModelBackbones(nn.Module):
     def forward(self, ex):
         context_exemplar = "era5" if self.w_era5 else "era5_land"
         B, N, cC, cH, cW = ex[context_exemplar].shape
+        if self.normalise_using_batch and B <= 4:
+            warnings.warn(
+                "WARNING: This model has been set to normalise using batch statistics. "
+                "Small batch might have issues."
+            )
         batch_positions = (
             torch.arange(0, N).reshape((1, N)).repeat((B, 1)).to(ex[context_exemplar].device)
         )

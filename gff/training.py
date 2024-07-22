@@ -130,7 +130,9 @@ def make_augmentation(C):
         r = {**example}
         if "gaussian_noise" in C["augments"]:
             for k in C["data_sources"]:
-                r[k] = r[k] + torch.randn(r[k].shape, device=r[k].device) * r[k].max() * 0.001
+                ch_dim = 2 if len(r[k].shape) == 5 else 1
+                maxv = gff.util.nanop(r[k], dim=ch_dim, op=torch.max)
+                r[k] = r[k] + torch.randn(r[k].shape, device=r[k].device) * maxv * 0.001
         if "blur" in C["augments"]:
             if random.random() < 0.3:
                 for k in C["data_sources"]:
@@ -138,8 +140,8 @@ def make_augmentation(C):
         if "hflip" in C["augments"]:
             if random.random() < 0.1:
                 for k in C["data_sources"]:
-                    r[k] = torchvision.transforms.v2.functional.horizontal_flip(r[k])
-                r["floodmap"] = torchvision.transforms.v2.functional.horizontal_flip(r["floodmap"])
+                    r[k] = torch.flip(r[k], (-1,))
+                r["floodmap"] = torch.flip(r["floodmap"], (-1,))
                 r["hflipped"] = True
         return r
 

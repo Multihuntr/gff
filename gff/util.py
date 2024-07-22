@@ -368,6 +368,18 @@ def seed_packages(seed):
     torch.backends.cudnn.benchmark = False
 
 
+def nanop(arr: torch.Tensor, dim: int, op: callable):
+    op_out_list = []
+    for c in range(arr.shape[dim]):
+        ch_data = torch.select(arr, dim, c)
+        nanmask = torch.isnan(ch_data)
+        op_out_list.append(op(ch_data[~nanmask]))
+    op_out_shp = [1 for _ in arr.shape]
+    op_out_shp[dim] = len(op_out_list)
+    op_out = torch.tensor(op_out_list, device=arr.device).reshape(op_out_shp)
+    return op_out
+
+
 # The ol' misc. functions
 
 

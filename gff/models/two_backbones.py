@@ -8,6 +8,7 @@ import torch.nn.functional as F
 import gff.models.utae as utae
 import gff.models.metnet as metnet
 import gff.models.unet3d as unet3d
+import gff.util
 
 
 def nans_to_zero(t: torch.Tensor | None):
@@ -243,10 +244,12 @@ class ModelBackbones(nn.Module):
                 # but channel is in a different position for different data
                 if len(data.shape) == 5:
                     dims = (0, 1, 3, 4)
+                    ch_dim = 2
                 else:
                     dims = (0, 2, 3)
-                mean = data.mean(dim=dims, keepdim=True)
-                std = data.std(dim=dims, keepdim=True)
+                    ch_dim = 1
+                mean = torch.nanmean(data, dim=dims, keepdim=True)
+                std = gff.util.nanop(data, dim=ch_dim, op=torch.std)
                 if key == "hydroatlas_basin":
                     mean[:, self.hydroatlas_class_mask] = 0
                     std[:, self.hydroatlas_class_mask] = 1

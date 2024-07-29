@@ -165,7 +165,7 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         # Add in various data sources
         # Weather data
         future_name = gff.constants.KUROSIWO_S1_NAMES[-1]
-        weather_end = datetime.datetime.fromisoformat(meta[f"{future_name}_date"])
+        weather_end = datetime.datetime.fromisoformat(meta[f"{future_name}_date"].rstrip("Z"))
         weather_start = weather_end - datetime.timedelta(days=(self.C["weather_window"] - 1))
         if "era5_land" in self.C["data_sources"]:
             fpath = floodmap_path.with_name(floodmap_path.stem + "-era5-land.tif")
@@ -191,6 +191,20 @@ class FloodForecastDataset(torch.utils.data.Dataset):
             )
             result["era5"] = np.array(data, dtype=np.float32)
             result["fpaths"]["era5"] = fpath
+        if "glofas" in self.C["data_sources"]:
+            d_str = weather_end.strftime("%Y-%m-%d")
+            fpath = self.floodmap_path / f"{meta['key']}_{d_str}.nc"
+            data = gff.data_sources.load_glofas(
+                fpath,
+                context_geom,
+                context_res,
+                weather_start,
+                weather_end,
+                bands=self.C["glofas_keys"],
+                cache_in_ram=self.C["cache_context_in_ram"],
+            )
+            result["glofas"] = np.array(data, dtype=np.float32)
+            result["fpaths"]["glofas"] = fpath
 
         # (Relatively) static soil attributes
         if "hydroatlas_basin" in self.C["data_sources"]:

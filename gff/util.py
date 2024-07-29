@@ -159,13 +159,16 @@ def resample_xr(
     bounds: tuple[int, int, int, int],
     size: tuple[int, int],
     method: str = "nearest",
+    x_key: str = "x",
+    y_key: str = "y",
 ):
     xlo, ylo, xhi, yhi = bounds
     # NOTE: linspace is inclusive of hi (endpoint=True is default), and
     #       xarray treats coordinates as pixel centers.
     xs = np.linspace(xlo, xhi, size[1])
     ys = np.linspace(yhi, ylo, size[0])
-    return arr.interp(x=xs, y=ys, method=method, kwargs={"fill_value": "extrapolate"})
+    kwargs = {x_key: xs, y_key: ys}
+    return arr.interp(**kwargs, method=method, kwargs={"fill_value": "extrapolate"})
 
 
 def resample_bilinear_subpixel(arr, bounds):
@@ -196,6 +199,11 @@ def tif_data_ram(fpath: Path):
         memfile.write(tif.read())
     tif = rasterio.open(memfile, "r+")
     return tif
+
+
+@functools.cache
+def nc_data_ram(fpath: Path):
+    return xarray.open_dataset(fpath).compute()
 
 
 def _get_tile_cached(p, *args, **kwargs):
@@ -358,6 +366,18 @@ def seed_packages(seed):
     os.environ["PYTHONHASHSEED"] = str(seed)
     torch.use_deterministic_algorithms(True, warn_only=True)
     torch.backends.cudnn.benchmark = False
+
+
+def nanop(arr: torch.Tensor, dim: int, op: callable):
+    op_out_list = []
+    for c in range(arr.shape[dim]):
+        ch_data = torch.select(arr, dim, c)
+        nanmask = torch.isnan(ch_data)
+        op_out_list.append(op(ch_data[~nanmask]))
+    op_out_shp = [1 for _ in arr.shape]
+    op_out_shp[dim] = len(op_out_list)
+    op_out = torch.tensor(op_out_list, device=arr.device).reshape(op_out_shp)
+    return op_out
 
 
 # The ol' misc. functions

@@ -1,4 +1,5 @@
 import argparse
+import datetime
 import json
 from pathlib import Path
 import sys
@@ -9,6 +10,7 @@ import geopandas
 import pandas
 import rasterio
 import tqdm
+import xarray
 
 import gff.constants
 import gff.data_sources
@@ -170,6 +172,51 @@ def get_stats_s1_dem(folder: Path):
     return s1_means, s1_stds, dem_means, dem_stds, hand_means, hand_stds
 
 
+def get_stats_glofas(folder: Path):
+    bands = ["dis24", "rowe", "swir"]
+    glofas_sums = []
+    glofas_sum_sqrs = []
+    glofas_counts = []
+    test_fnames = []
+    for i in range(gff.constants.N_PARTITIONS):
+        glofas_sums.append(np.zeros(len(bands), dtype=np.float64))
+        glofas_sum_sqrs.append(np.zeros(len(bands), dtype=np.float128))
+        glofas_counts.append(np.zeros(len(bands), dtype=np.int64))
+        fpath = folder / "partitions" / f"floodmap_partition_{i}.txt"
+        test_fnames.append(pandas.read_csv(fpath, header=None)[0].values.tolist())
+
+    fpaths = list((folder / "rois").glob("*-meta.json"))
+    for j, meta_fpath in enumerate(tqdm.tqdm(fpaths, desc="Files")):
+        with open(meta_fpath) as f:
+            meta = json.load(f)
+
+        incl_partition = []
+        for i, fold_fnames in enumerate(test_fnames):
+            if meta_fpath.name not in fold_fnames:
+                incl_partition.append(i)
+
+        d_str = datetime.datetime.fromisoformat(meta["post_date"]).strftime("%Y-%m-%d")
+        glofas_fname = f'{meta["key"]}_{d_str}.nc'
+        dataset = xarray.open_dataset(meta_fpath.parent / glofas_fname)
+
+        data = np.array([getattr(dataset, band).values for band in bands])
+        glofas_summed = np.nansum(data, axis=(1, 2, 3))
+        glofas_sum_sqred = np.nansum(data**2, axis=(1, 2, 3))
+        glofas_counted = (~np.isnan(data)).sum(axis=(1, 2, 3))
+
+        for idx in incl_partition:
+            glofas_sums[idx] += glofas_summed
+            glofas_sum_sqrs[idx] += glofas_sum_sqred
+            glofas_counts[idx] += glofas_counted
+
+    glofas_means, glofas_stds = [], []
+    for i in range(gff.constants.N_PARTITIONS):
+        glofas_means.append(glofas_sums[i] / glofas_counts[i])
+        glofas_stds.append(np.sqrt(glofas_sum_sqrs[i] / glofas_counts[i] - glofas_means[i] ** 2))
+
+    return glofas_means, glofas_stds
+
+
 def main(args):
     # Normalise ERA5, ERA5-Land and HydroATLAS by reading the whole dataset
     era5_folder = args.data_path / gff.constants.ERA5_FOLDER
@@ -196,6 +243,7 @@ def main(args):
     )
 
     s1_mean, s1_std, dem_mean, dem_std, hand_mean, hand_std = get_stats_s1_dem(args.data_path)
+    glofas_mean, glofas_std = get_stats_glofas(args.data_path)
 
     for x in range(gff.constants.N_PARTITIONS):
         gff.normalisation.save(
@@ -206,6 +254,13 @@ def main(args):
         )
         gff.normalisation.save(
             args.data_path, f"hand_norm_{x}.csv", ["hand"], hand_mean[x], hand_std[x]
+        )
+        gff.normalisation.save(
+            args.data_path,
+            f"glofas_norm_{x}.csv",
+            ["dis24", "rowe", "swir"],
+            glofas_mean[x],
+            glofas_std[x],
         )
 
 

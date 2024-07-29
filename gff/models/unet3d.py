@@ -15,14 +15,17 @@ from einops import rearrange
 def exists(val):
     return val is not None
 
-class SimpleDynamicLayerNorm(nn.Module):
-    '''
-    Wraps layer norm to dynamically provide shape.
-    Does not learn elementwise affine.
-    '''
-    def forward(self, inp, **kwargs):
-        shp = inp.shape[1:]
-        out = F.layer_norm(inp, shp, **kwargs)
+class ChannelwiseLayerNorm(nn.Module):
+    def __init__(self, *args, elementwise_affine=False, **kwargs):
+        super().__init__()
+        if elementwise_affine is None:
+            elementwise_affine = False
+        self.norm = nn.LayerNorm(*args, elementwise_affine=elementwise_affine, **kwargs)
+    def forward(self, inp):
+        B, C, D, H, W = inp.shape
+        out = rearrange(inp, 'b c d h w -> (b d h w) c')
+        out = self.norm(out)
+        out = rearrange(out, '(b d h w) c -> b c d h w', b=B, c=C, d=D, h=H, w=W)
         return out
 
 class ConvLayer3d(nn.Module):
@@ -31,6 +34,7 @@ class ConvLayer3d(nn.Module):
         in_dim,
         out_dim,
         cond_dim=None,  # lead_time_embed_dim
+        cond_norm_affine=False,
     ):
         super(ConvLayer3d, self).__init__()
 
@@ -38,7 +42,7 @@ class ConvLayer3d(nn.Module):
 
         layers = []
         layers.append(nn.Conv3d(in_dim, out_dim, kernel_size=3, stride=1, padding=1))
-        layers.append(SimpleDynamicLayerNorm())
+        layers.append(ChannelwiseLayerNorm(out_dim, elementwise_affine=cond_norm_affine))
         layers.append(nn.LeakyReLU(inplace=True))
         self.conv = nn.Sequential(*layers)
 
@@ -46,7 +50,7 @@ class ConvLayer3d(nn.Module):
             self.mlp = nn.Sequential(
                         nn.ReLU(),
                         nn.Linear(cond_dim, out_dim * 2),
-                        ).to("cuda")
+                        )
 
     def forward(self, input, lead=None):
         assert not (exists(self.mlp) ^ exists(lead))
@@ -58,7 +62,7 @@ class ConvLayer3d(nn.Module):
 
         for _, layer in enumerate(self.conv):
             input = layer(input)
-            isNormLayer = isinstance(layer, SimpleDynamicLayerNorm)
+            isNormLayer = isinstance(layer, ChannelwiseLayerNorm)
             # apply linear transform on CONV output
             # (following a normalization, and preceding an output non-linearity)
             if (
@@ -81,6 +85,7 @@ class ConvTransposeLayer3d(nn.Module):
         in_dim,
         out_dim,
         cond_dim=None,  # lead_time_embed_dim
+        cond_norm_affine=False,
         op_type='3d', # 3d or 2d
     ):
         super(ConvTransposeLayer3d, self).__init__()
@@ -93,7 +98,7 @@ class ConvTransposeLayer3d(nn.Module):
             layers.append(nn.ConvTranspose3d(in_dim, out_dim, kernel_size=3, stride=2, padding=1, output_padding=1))
         elif self.op_type=='2d':
             layers.append(nn.ConvTranspose2d(in_dim, out_dim, kernel_size=3, stride=2, padding=1, output_padding=1))
-        layers.append(SimpleDynamicLayerNorm())
+        layers.append(ChannelwiseLayerNorm(out_dim, elementwise_affine=cond_norm_affine))
         layers.append(nn.LeakyReLU(inplace=True))
         uses_relu = True
         self.norm_then_relu.append(uses_relu)
@@ -103,7 +108,7 @@ class ConvTransposeLayer3d(nn.Module):
             self.mlp = nn.Sequential(
                         nn.ReLU(),
                         nn.Linear(cond_dim, out_dim * 2),
-                        ).to("cuda")
+                        )
 
     def forward(self, input, lead=None):
         assert not (exists(self.mlp) ^ exists(lead))
@@ -119,7 +124,7 @@ class ConvTransposeLayer3d(nn.Module):
                 input = input.unsqueeze(2)
             else:
                 input = layer(input)
-            isNormLayer = isinstance(layer, SimpleDynamicLayerNorm)
+            isNormLayer = isinstance(layer, ChannelwiseLayerNorm)
             # apply linear transform on CONV output
             # (following a normalization, and preceding an output non-linearity)
             if (
@@ -142,6 +147,7 @@ class ConvBlock3d(nn.Module):
         in_dim,
         out_dims,
         cond_dim=None,  # lead_time_embed_dim
+        cond_norm_affine=False,
         end_pool=None, #should be None, 3d, or 2d
         skip=True,
     ):
@@ -156,6 +162,7 @@ class ConvBlock3d(nn.Module):
                     in_dim=out_dims[i-1],
                     out_dim=out_dims[i],
                     cond_dim=cond_dim,
+                    cond_norm_affine=cond_norm_affine,
                 ))
             else:
                 layers.append(
@@ -163,6 +170,7 @@ class ConvBlock3d(nn.Module):
                     in_dim=in_dim,
                     out_dim=out_dims[i],
                     cond_dim=cond_dim,
+                    cond_norm_affine=cond_norm_affine,
                 ))
         self.conv=nn.ModuleList(layers)
         if self.end_pool == '3d':
@@ -194,6 +202,7 @@ class CenterConvBlock3d(nn.Module):
         in_dim,
         out_dims,
         cond_dim=None,  # lead_time_embed_dim
+        cond_norm_affine=False,
         op_type='3d', # 3d or 2d
     ):
         super(CenterConvBlock3d, self).__init__()
@@ -207,6 +216,7 @@ class CenterConvBlock3d(nn.Module):
                     in_dim=out_dims[i-1],
                     out_dim=out_dims[i],
                     cond_dim=cond_dim,
+                    cond_norm_affine=cond_norm_affine,
                 ))
             else:
                 layers.append(
@@ -214,6 +224,7 @@ class CenterConvBlock3d(nn.Module):
                     in_dim=in_dim,
                     out_dim=out_dims[i],
                     cond_dim=cond_dim,
+                    cond_norm_affine=cond_norm_affine,
                 ))
         self.conv=nn.ModuleList(layers)
         if self.op_type=='3d':
@@ -242,6 +253,7 @@ class UNet3D(nn.Module):
         pad_value=None,
         zero_pad=True,
         cond_dim=None,
+        cond_norm_affine=False,
         op_type='3d', # should be 3d or 2d
     ):
         super(UNet3D, self).__init__()
@@ -254,6 +266,7 @@ class UNet3D(nn.Module):
             in_dim=input_dim,
             out_dims=[feats*4,feats*4],
             cond_dim=cond_dim,
+            cond_norm_affine=cond_norm_affine,
             end_pool=self.op_type,
             skip=True
         )
@@ -261,6 +274,7 @@ class UNet3D(nn.Module):
             in_dim=feats*4,
             out_dims=[feats*8, feats*8],
             cond_dim=cond_dim,
+            cond_norm_affine=cond_norm_affine,
             end_pool=self.op_type,
             skip=True
         )
@@ -270,6 +284,7 @@ class UNet3D(nn.Module):
             in_dim=feats*8,
             out_dims=out_dims_center,
             cond_dim=cond_dim,
+            cond_norm_affine=cond_norm_affine,
             op_type=self.op_type
         )
 
@@ -279,6 +294,7 @@ class UNet3D(nn.Module):
                 in_dim=feats*16,
                 out_dims=[feats*8, feats*8],
                 cond_dim=cond_dim,
+                cond_norm_affine=cond_norm_affine,
                 end_pool=None,
                 skip=False
             )
@@ -288,6 +304,7 @@ class UNet3D(nn.Module):
                 in_dim=feats*8,
                 out_dim=feats*4,
                 cond_dim=cond_dim,
+                cond_norm_affine=cond_norm_affine,
                 op_type=self.op_type
             )
         )
@@ -297,6 +314,7 @@ class UNet3D(nn.Module):
                 in_dim=feats*8,
                 out_dims=[feats*4, feats*2],
                 cond_dim=cond_dim,
+                cond_norm_affine=cond_norm_affine,
                 end_pool=None,
                 skip=False
             )

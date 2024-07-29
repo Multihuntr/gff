@@ -8,12 +8,7 @@ import torch.nn.functional as F
 import gff.models.utae as utae
 import gff.models.metnet as metnet
 import gff.models.unet3d as unet3d
-<<<<<<< HEAD
 import gff.models.LogisticRegression as lr_model
-=======
-import gff.util
-
->>>>>>> ac62b94ac79f07deb4465c50be864e9109292696
 
 def nans_to_zero(t: torch.Tensor | None):
     if t is not None:
@@ -291,7 +286,6 @@ class ModelBackbones(nn.Module):
             return None
 
     def forward(self, ex):
-<<<<<<< HEAD
         if self.backbone != "LR":
             B, N, cC, cH, cW = ex["era5"].shape
             batch_positions = torch.arange(0, N).reshape((1, N)).repeat((B, 1)).to(ex["era5"].device)
@@ -316,43 +310,6 @@ class ModelBackbones(nn.Module):
             dem_context_inp = nans_to_zero(dem_context_inp)
             dem_local_inp = nans_to_zero(dem_local_inp)
             hand_inp = nans_to_zero(hand_inp)
-=======
-        context_exemplar = "era5" if self.w_era5 else "era5_land"
-        B, N, cC, cH, cW = ex[context_exemplar].shape
-        if self.normalise_using_batch and B <= 4:
-            warnings.warn(
-                "WARNING: This model has been set to normalise using batch statistics. "
-                "Small batch might have issues."
-            )
-        batch_positions = (
-            torch.arange(0, N).reshape((1, N)).repeat((B, 1)).to(ex[context_exemplar].device)
-        )
-        if self.w_s1:
-            example_local = ex["s1"]
-        else:
-            example_local = ex["dem_local"]
-        fH, fW = example_local.shape[-2:]
-
-        # Normalise inputs
-        era5_inp = self.normalise(ex, "era5")
-        era5l_inp = self.normalise(ex, "era5_land")
-        glofas_inp = self.normalise(ex, "glofas")
-        hydroatlas_inp = self.normalise(ex, "hydroatlas_basin")
-        dem_context_inp = self.normalise(ex, "dem", "context")
-        derived_landsea_context = self.derive_landsea(dem_context_inp)
-        dem_local_inp = self.normalise(ex, "dem", "local")
-        derived_landsea_local = self.derive_landsea(dem_local_inp)
-        hand_inp = self.normalise(ex, "hand")
-        s1_inp = self.normalise(ex, "s1")
-
-        # These inputs might have nan
-        era5l_inp = nans_to_zero(era5l_inp)
-        glofas_inp = nans_to_zero(glofas_inp)
-        hydroatlas_inp = nans_to_zero(hydroatlas_inp)
-        dem_context_inp = nans_to_zero(dem_context_inp)
-        dem_local_inp = nans_to_zero(dem_local_inp)
-        hand_inp = nans_to_zero(hand_inp)
->>>>>>> ac62b94ac79f07deb4465c50be864e9109292696
 
             # Get Lead time embeddings
             if self.w_s1:
@@ -361,7 +318,6 @@ class ModelBackbones(nn.Module):
             else:
                 lead = None
 
-<<<<<<< HEAD
             # Process context inputs
             context_statics_lst = []
             if self.w_hydroatlas_basin:
@@ -381,28 +337,6 @@ class ModelBackbones(nn.Module):
             context_inp = torch.cat(context_lst, dim=2)
             context_embedded = self.context_embed(
                 context_inp, batch_positions=batch_positions, lead=lead
-=======
-        # Process context inputs
-        context_statics_lst = []
-        if self.w_hydroatlas_basin:
-            embedded_hydro_atlas_raster = self.hydro_atlas_embed(hydroatlas_inp)
-            context_statics_lst.append(embedded_hydro_atlas_raster)
-        if self.w_dem_context:
-            context_statics_lst.append(dem_context_inp)
-            if self.derive_land_sea_from_dem:
-                context_statics_lst.append(derived_landsea_context)
-        # Add the statics in at every step
-        context_lst = []
-        if self.w_era5_land:
-            context_lst.append(era5l_inp)
-        if self.w_era5:
-            context_lst.append(era5_inp)
-        if self.w_glofas:
-            context_lst.append(glofas_inp)
-        if self.w_hydroatlas_basin or self.w_dem_context:
-            context_statics = (
-                torch.cat(context_statics_lst, dim=1).unsqueeze(1).repeat((1, N, 1, 1, 1))
->>>>>>> ac62b94ac79f07deb4465c50be864e9109292696
             )
             if self.backbone != "3dunet":
                 context_embedded = context_embedded[:, 0]
@@ -419,7 +353,6 @@ class ModelBackbones(nn.Module):
                 context_out = context_out.mean(axis=(2, 3), keepdims=True)
             context_out_upsc = F.interpolate(context_out, size=(fH, fW), mode="nearest")
 
-<<<<<<< HEAD
             # Process local inputs
             local_lst = [context_out_upsc]
             if self.w_s1:
@@ -451,17 +384,6 @@ class ModelBackbones(nn.Module):
                 local_lst.append(dem_local_inp)
             if self.w_hand:
                 local_lst.append(hand_inp)
-=======
-        # Process local inputs
-        local_lst = [context_out_upsc]
-        if self.w_s1:
-            local_lst.append(s1_inp)
-        if self.w_dem_local:
-            local_lst.append(dem_local_inp)
-            if self.derive_land_sea_from_dem:
-                local_lst.append(derived_landsea_local)
-        if self.w_hand:
->>>>>>> ac62b94ac79f07deb4465c50be864e9109292696
             local_lst.append(hand_inp)
             local_inp = torch.cat(local_lst, dim=1)
             # Pretend it's temporal data with one time step

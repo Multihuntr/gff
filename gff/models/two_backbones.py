@@ -103,10 +103,17 @@ class ModelBackbones(nn.Module):
         self.average_context = average_context
         self.backbone = backbone
         self.normalise_using_batch = normalise_using_batch
+<<<<<<< HEAD
         if self.normalise_using_batch:
             self.hydroatlas_class_mask = [
                 (band.split("_")[1] in ["cl", "id"]) for band in self.hydroatlas_bands
             ]
+=======
+
+        self.hydroatlas_class_mask = [
+            (band.split("_")[1] in ["cl", "id"]) for band in self.hydroatlas_bands
+        ]
+>>>>>>> added glofas
 
         # Store normalisation info on model
         # (To load model weights, the shapes must be identical; so use empty if not known at init)
@@ -409,7 +416,11 @@ if __name__ == "__main__":
     ex = {
         "era5": torch.randn((B, T, n_era5, cH, cW)).cuda(),
         "era5_land": torch.randn((B, T, n_era5_land, cH, cW)).cuda(),
+<<<<<<< HEAD
         "glofas": torch.randn((B, T, n_glofas, cH, cW)).cuda(),
+=======
+        "glofas": torch.randn((B, T, n_era5_land, cH, cW)).cuda(),
+>>>>>>> added glofas
         "hydroatlas_basin": torch.randn((B, n_hydroatlas, cH, cW)).cuda(),
         "dem_context": torch.randn((B, 1, cH, cW)).cuda(),
         "s1": torch.randn(B, 2, fH, fW).cuda(),
@@ -442,7 +453,11 @@ if __name__ == "__main__":
             model = ModelBackbones(
                 era5_bands,
                 era5l_bands,
+<<<<<<< HEAD
                 glofas_bands,
+=======
+                [],
+>>>>>>> added glofas
                 hydroatlas_bands,
                 hydroatlas_dim,
                 **lead,

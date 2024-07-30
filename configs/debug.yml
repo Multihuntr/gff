@@ -20,7 +20,7 @@ data_sources:
   - s1
 
 n_classes: 3
-half_res_context: False
+half_res_context: True
 batch_size: 1
 lr: 0.001
 lr_decay: 0.9999

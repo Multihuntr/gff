@@ -2,17 +2,17 @@ seed: 6426452
 data_folder: ~/data/gff-data
 device: cuda:0
 
-name: two_recunet
+name: two_utae
 
 model: two_backbones
-backbone: recunet_lstm
+backbone: utae
 hydroatlas_dim: 16
 lead_time_dim: 16
 context_embed_output_dim: 128
 center_crop_context: False
 average_context: False
 derive_land_sea_from_dem: True
-cond_norm_affine: null
+cond_norm_affine: False
 normalise_using_batch: False
 
 dataset: forecast_dataset
@@ -43,9 +43,7 @@ class_weights:
   - 2
   - 5
 augments:
-  - blur
-  - gaussian_noise
-  - hflip
+  - None
 
 glofas_keys:
   - dis24

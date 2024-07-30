@@ -11,7 +11,7 @@ lead_time_dim: 16
 context_embed_output_dim: 128
 center_crop_context: False
 average_context: False
-derive_land_sea_from_dem: False
+derive_land_sea_from_dem: True
 cond_norm_affine: null
 normalise_using_batch: False
 
@@ -27,7 +27,7 @@ data_sources:
   - s1
 
 n_classes: 2
-half_res_context: False
+half_res_context: True
 batch_size: 16
 lr: 0.001
 lr_decay: 0.8

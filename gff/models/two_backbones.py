@@ -390,6 +390,8 @@ class ModelBackbones(nn.Module):
             local_lst.append(s1_inp)
         if self.w_dem_local:
             local_lst.append(dem_local_inp)
+            if self.derive_land_sea_from_dem:
+                local_lst.append(derived_landsea_local)
         if self.w_hand:
             local_lst.append(hand_inp)
         local_inp = torch.cat(local_lst, dim=1)
@@ -397,7 +399,7 @@ class ModelBackbones(nn.Module):
         local_inp = local_inp[:, None]
         out = self.local_embed(local_inp, batch_positions=batch_positions[:, :1], lead=lead)
 
-        if self.backbone not in ["3dunet"]:
+        if self.backbone != "3dunet":
             out = out[:, 0]
         return out
 

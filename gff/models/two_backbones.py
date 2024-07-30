@@ -399,7 +399,7 @@ class ModelBackbones(nn.Module):
         local_inp = local_inp[:, None]
         out = self.local_embed(local_inp, batch_positions=batch_positions[:, :1], lead=lead)
 
-        if self.backbone != "3dunet":
+        if self.backbone not in ["3dunet", "LR", "Context+LR"]:
             out = out[:, 0]
         return out
 
@@ -469,6 +469,8 @@ if __name__ == "__main__":
             out = model(ex)
             assert out.shape == (8, 3, 224, 224)
             print("🗸", end="")
+    
+    lead = {"lead_time_dim": lead_time_dim}
     model = ModelBackbones(
         era5_bands,
         era5l_bands,
@@ -479,6 +481,10 @@ if __name__ == "__main__":
         **to_remove[-1],
         weather_window_size=T,
         backbone="LR",
-    )
+    ).cuda()
+    out = model(ex)
+    assert out.shape == (8, 3, 224, 224)
+    print("\n Checking that the weight extraction works for the LR context layer:\n")
+    lr_model.print_weights(model, ["S1 (0)", "S2 (0)", "HAND"])
     print("🗸", end="")
     print()

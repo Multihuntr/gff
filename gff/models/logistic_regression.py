@@ -14,7 +14,7 @@ class LogisticRegression(nn.Module):
 
         self.model = nn.Conv2d(n_channels, out_channels, 3, padding=1, padding_mode="reflect")
 
-    def forward(self, x, lead):
+    def forward(self, x, batch_positions, lead):
         return self.model(x.squeeze(1))
 
 

@@ -238,7 +238,7 @@ class ModelBackbones(nn.Module):
             self.local_embed = lr_model.LogisticRegression(n_channels=local_input_dim - context_embed_output_dim + 1, out_channels=n_predict)
         elif backbone == "Context+LR":
             self.context_embed = None # put your best model here
-            self.local_embed = lr_model.LogisticRegression(n_channels=local_input_dim, out_channels=n_predict, cond_dim=lead_time_dim)
+            self.local_embed = lr_model.LogisticRegression(n_channels=local_input_dim, out_channels=n_predict)
         else:
             raise NotImplementedError(f"Unknown model name: {backbone}")
 
@@ -286,110 +286,86 @@ class ModelBackbones(nn.Module):
             return None
 
     def forward(self, ex):
-        if self.backbone != "LR":
-            B, N, cC, cH, cW = ex["era5"].shape
-            batch_positions = torch.arange(0, N).reshape((1, N)).repeat((B, 1)).to(ex["era5"].device)
-            if self.w_s1:
-                example_local = ex["s1"]
-            else:
-                example_local = ex["dem_local"]
-            fH, fW = example_local.shape[-2:]
-
-            # Normalise inputs
-            era5_inp = self.normalise(ex, "era5")
-            era5l_inp = self.normalise(ex, "era5_land")
-            hydroatlas_inp = self.normalise(ex, "hydroatlas_basin")
-            dem_context_inp = self.normalise(ex, "dem", "context")
-            dem_local_inp = self.normalise(ex, "dem", "local")
-            hand_inp = self.normalise(ex, "hand")
-            s1_inp = self.normalise(ex, "s1")
-
-            # These inputs might have nan
-            era5l_inp = nans_to_zero(era5l_inp)
-            hydroatlas_inp = nans_to_zero(hydroatlas_inp)
-            dem_context_inp = nans_to_zero(dem_context_inp)
-            dem_local_inp = nans_to_zero(dem_local_inp)
-            hand_inp = nans_to_zero(hand_inp)
-
-            # Get Lead time embeddings
-            if self.w_s1:
-                lead_idx = self.get_lead_time_idx(ex["s1_lead_days"])
-                lead = self.lead_time_embedding(lead_idx)
-            else:
-                lead = None
-
-            # Process context inputs
-            context_statics_lst = []
-            if self.w_hydroatlas_basin:
-                embedded_hydro_atlas_raster = self.hydro_atlas_embed(hydroatlas_inp)
-                context_statics_lst.append(embedded_hydro_atlas_raster)
-            if self.w_dem_context:
-                context_statics_lst.append(dem_context_inp)
-            # Add the statics in at every step
-            context_lst = [era5_inp]
-            if self.w_era5_land:
-                context_lst.insert(0, era5l_inp)
-            if self.w_hydroatlas_basin or self.w_dem_context:
-                context_statics = (
-                    torch.cat(context_statics_lst, dim=1).unsqueeze(1).repeat((1, N, 1, 1, 1))
-                )
-                context_lst.append(context_statics)
-            context_inp = torch.cat(context_lst, dim=2)
-            context_embedded = self.context_embed(
-                context_inp, batch_positions=batch_positions, lead=lead
-            )
-            if self.backbone != "3dunet":
-                context_embedded = context_embedded[:, 0]
-
-            # Select the central 2x2 pixels and average
-            if self.center_crop_context:
-                ylo, yhi = cH // 2 - 1, cH // 2 + 3
-                xlo, xhi = cW // 2 - 1, cW // 2 + 3
-            else:
-                ylo, yhi = 0, cH
-                xlo, xhi = 0, cW
-            context_out = context_embedded[:, :, ylo:yhi, xlo:xhi]
-            if self.average_context:
-                context_out = context_out.mean(axis=(2, 3), keepdims=True)
-            context_out_upsc = F.interpolate(context_out, size=(fH, fW), mode="nearest")
-
-            # Process local inputs
-            local_lst = [context_out_upsc]
-            if self.w_s1:
-                local_lst.append(s1_inp)
-            if self.w_dem_local:
-                local_lst.append(dem_local_inp)
-            if self.w_hand:
-                local_lst.append(hand_inp)
-            local_inp = torch.cat(local_lst, dim=1)
-            # Pretend it's temporal data with one time step
-            local_inp = local_inp[:, None]
-            out = self.local_embed(local_inp, batch_positions=batch_positions[:, :1], lead=lead)
+        B, N, cC, cH, cW = ex["era5"].shape
+        batch_positions = torch.arange(0, N).reshape((1, N)).repeat((B, 1)).to(ex["era5"].device)
+        if self.w_s1:
+            example_local = ex["s1"]
         else:
-            B, N, cC, cH, cW = ex["era5"].shape
-            batch_positions = torch.arange(0, N).reshape((1, N)).repeat((B, 1)).to(ex["era5"].device)
-            local_lst = []
-            dem_local_inp = self.normalise(ex, "dem", "local")
-            s1_inp = self.normalise(ex, "s1")
-            hand_inp = self.normalise(ex, "hand")
-            # Get Lead time embeddings
-            if self.w_s1:
-                lead_idx = self.get_lead_time_idx(ex["s1_lead_days"])
-                lead = self.lead_time_embedding(lead_idx)
-            else:
-                lead = None
-            if self.w_s1:
-                local_lst.append(s1_inp)
-            if self.w_dem_local:
-                local_lst.append(dem_local_inp)
-            if self.w_hand:
-                local_lst.append(hand_inp)
+            example_local = ex["dem_local"]
+        fH, fW = example_local.shape[-2:]
+
+        # Normalise inputs
+        era5_inp = self.normalise(ex, "era5")
+        era5l_inp = self.normalise(ex, "era5_land")
+        hydroatlas_inp = self.normalise(ex, "hydroatlas_basin")
+        dem_context_inp = self.normalise(ex, "dem", "context")
+        dem_local_inp = self.normalise(ex, "dem", "local")
+        hand_inp = self.normalise(ex, "hand")
+        s1_inp = self.normalise(ex, "s1")
+
+        # These inputs might have nan
+        era5l_inp = nans_to_zero(era5l_inp)
+        hydroatlas_inp = nans_to_zero(hydroatlas_inp)
+        dem_context_inp = nans_to_zero(dem_context_inp)
+        dem_local_inp = nans_to_zero(dem_local_inp)
+        hand_inp = nans_to_zero(hand_inp)
+
+        # Get Lead time embeddings
+        if self.w_s1:
+            lead_idx = self.get_lead_time_idx(ex["s1_lead_days"])
+            lead = self.lead_time_embedding(lead_idx)
+        else:
+            lead = None
+
+        # Process context inputs
+        context_statics_lst = []
+        if self.w_hydroatlas_basin:
+            embedded_hydro_atlas_raster = self.hydro_atlas_embed(hydroatlas_inp)
+            context_statics_lst.append(embedded_hydro_atlas_raster)
+        if self.w_dem_context:
+            context_statics_lst.append(dem_context_inp)
+        # Add the statics in at every step
+        context_lst = [era5_inp]
+        if self.w_era5_land:
+            context_lst.insert(0, era5l_inp)
+        if self.w_hydroatlas_basin or self.w_dem_context:
+            context_statics = (
+                torch.cat(context_statics_lst, dim=1).unsqueeze(1).repeat((1, N, 1, 1, 1))
+            )
+            context_lst.append(context_statics)
+        context_inp = torch.cat(context_lst, dim=2)
+        context_embedded = self.context_embed(
+            context_inp, batch_positions=batch_positions, lead=lead
+        )
+        if self.backbone != "3dunet":
+            context_embedded = context_embedded[:, 0]
+
+        # Select the central 2x2 pixels and average
+        if self.center_crop_context:
+            ylo, yhi = cH // 2 - 1, cH // 2 + 3
+            xlo, xhi = cW // 2 - 1, cW // 2 + 3
+        else:
+            ylo, yhi = 0, cH
+            xlo, xhi = 0, cW
+        context_out = context_embedded[:, :, ylo:yhi, xlo:xhi]
+        if self.average_context:
+            context_out = context_out.mean(axis=(2, 3), keepdims=True)
+        context_out_upsc = F.interpolate(context_out, size=(fH, fW), mode="nearest")
+
+        # Process local inputs
+        local_lst = [context_out_upsc]
+        if self.w_s1:
+            local_lst.append(s1_inp)
+        if self.w_dem_local:
+            local_lst.append(dem_local_inp)
+        if self.w_hand:
             local_lst.append(hand_inp)
-            local_inp = torch.cat(local_lst, dim=1)
-            # Pretend it's temporal data with one time step
-            # local_inp = local_inp[:, None]
-            out = self.local_embed(local_inp, lead=lead)
-        
+        local_inp = torch.cat(local_lst, dim=1)
+        # Pretend it's temporal data with one time step
+        if self.backbone != "LR":
+            local_inp = local_inp[:, None]
+        out = self.local_embed(local_inp, batch_positions=batch_positions[:, :1], lead=lead)
+                
         if self.backbone not in ["3dunet", "LR", "Context+LR"]:
             out = out[:, 0]
         return out

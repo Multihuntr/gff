@@ -23,7 +23,7 @@ class DebugFloodForecastDataset(torch.utils.data.Dataset):
         self.n_times = C["n_times"]
         self.data_sources = C["data_sources"]
 
-        if C["half_context_res"]:
+        if C["half_res_context"]:
             c_res = 16
         else:
             c_res = 32

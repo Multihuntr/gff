@@ -8,7 +8,9 @@ import torch.nn.functional as F
 import gff.models.utae as utae
 import gff.models.metnet as metnet
 import gff.models.unet3d as unet3d
-import gff.models.LogisticRegression as lr_model
+import gff.models.logistic_regression as lr_model
+import gff.util
+
 
 def nans_to_zero(t: torch.Tensor | None):
     if t is not None:
@@ -38,8 +40,8 @@ def get_empty_norms(era5_bands: int, era5l_bands: int, glofas_bands: int, hydroa
 
 
 options_metnet = {
-    "dim": 32,
-    "attn_depth": 8,
+    "dim": 64,
+    "attn_depth": 12,
     "attn_dim_head": 64,
     "attn_heads": 16,
     "attn_dropout": 0.1,
@@ -124,63 +126,60 @@ class ModelBackbones(nn.Module):
         assert (
             self.w_s1 or self.w_dem_local or self.w_hand
         ), "Must provide one of s1, dem local or hand to produce local scale predictions"
-        assert (
-            self.w_era5
-            or self.w_era5_land
-            or self.w_glofas
-            or self.w_hydroatlas_basin
-            or self.w_dem_context
-        ), "Must provide one of era5, era5-land, glofas, dem context or hydroatlas to produce context scale predictions"
         assert (self.w_s1 and (lead_time_dim is not None)) or (
             (not self.w_s1) and (lead_time_dim is None)
         ), "If you provide s1, you must also provide lead_time_dim. If not, you shouldn't."
 
         # Determine context embedding sizes
-        context_embed_input_dim = 0
+        self.context_embed_input_dim = 0
         if self.w_era5:
-            context_embed_input_dim += len(era5_bands)
+            self.context_embed_input_dim += len(era5_bands)
         if self.w_era5_land:
-            context_embed_input_dim += len(era5l_bands)
+            self.context_embed_input_dim += len(era5l_bands)
         if self.w_glofas:
-            context_embed_input_dim += len(glofas_bands)
+            self.context_embed_input_dim += len(glofas_bands)
 
         if self.w_hydroatlas_basin:
             self.n_hydroatlas = len(hydroatlas_bands)
             self.hydro_atlas_embed = nn.Conv2d(
                 self.n_hydroatlas, hydroatlas_dim, kernel_size=3, padding=1
             )
-            context_embed_input_dim += hydroatlas_dim
+            self.context_embed_input_dim += hydroatlas_dim
         if self.w_dem_context:
-            context_embed_input_dim += 1
+            self.context_embed_input_dim += 1
             if self.derive_land_sea_from_dem:
-                context_embed_input_dim += 1
+                self.context_embed_input_dim += 1
 
         # Determine local sizes
-        local_input_dim = context_embed_output_dim
+        if self.context_embed_input_dim > 0:
+            self.local_input_dim = context_embed_output_dim
+        else:
+            self.local_input_dim = 0
         if self.w_dem_local:
-            local_input_dim += 1
+            self.local_input_dim += 1
             if self.derive_land_sea_from_dem:
-                local_input_dim += 1
+                self.local_input_dim += 1
         if self.w_hand:
-            local_input_dim += 1
+            self.local_input_dim += 1
         if self.w_s1:
-            local_input_dim += 2
+            self.local_input_dim += 2
             self.len_lead = weather_window_size + 1
             self.lead_time_embedding = nn.Embedding(self.len_lead, lead_time_dim)
 
         # Instantiate backbones
         if backbone == "utae":
-            self.context_embed = utae.UTAE(
-                context_embed_input_dim,
-                encoder_widths=[32, 32],
-                decoder_widths=[32, 32],
-                out_conv=[context_embed_output_dim],
-                cond_dim=lead_time_dim,
-                temp_encoding="ltae",
-                cond_norm_affine=cond_norm_affine,
-            )
+            if self.context_embed_input_dim > 0:
+                self.context_embed = utae.UTAE(
+                    self.context_embed_input_dim,
+                    encoder_widths=[32, 32],
+                    decoder_widths=[32, 32],
+                    out_conv=[context_embed_output_dim],
+                    cond_dim=lead_time_dim,
+                    temp_encoding="ltae",
+                    cond_norm_affine=cond_norm_affine,
+                )
             self.local_embed = utae.UTAE(
-                local_input_dim,
+                self.local_input_dim,
                 encoder_widths=[64, 64, 64, 128],
                 decoder_widths=[64, 64, 64, 128],
                 out_conv=[64, n_predict],
@@ -189,17 +188,18 @@ class ModelBackbones(nn.Module):
                 cond_norm_affine=cond_norm_affine,
             )
         elif backbone == "recunet_lstm":
-            self.context_embed = utae.UTAE(
-                context_embed_input_dim,
-                encoder_widths=[32, 32],
-                decoder_widths=[32, 32],
-                out_conv=[context_embed_output_dim],
-                cond_dim=lead_time_dim,
-                temp_encoding="lstm",
-                cond_norm_affine=cond_norm_affine,
-            )
+            if self.context_embed_input_dim > 0:
+                self.context_embed = utae.UTAE(
+                    self.context_embed_input_dim,
+                    encoder_widths=[32, 32],
+                    decoder_widths=[32, 32],
+                    out_conv=[context_embed_output_dim],
+                    cond_dim=lead_time_dim,
+                    temp_encoding="lstm",
+                    cond_norm_affine=cond_norm_affine,
+                )
             self.local_embed = utae.UTAE(
-                local_input_dim,
+                self.local_input_dim,
                 encoder_widths=[64, 64, 64, 128],
                 decoder_widths=[64, 64, 64, 128],
                 out_conv=[64, n_predict],
@@ -211,34 +211,40 @@ class ModelBackbones(nn.Module):
             options_metnet["lead_time_embed_dim"] = lead_time_dim
             options_metnet["cond_norm_affine"] = cond_norm_affine
 
-            options_metnet["dim_in"] = weather_window_size * context_embed_input_dim
+            options_metnet["dim_in"] = weather_window_size * self.context_embed_input_dim
             options_metnet["out_conv"] = context_embed_output_dim
-            self.context_embed = metnet.MetNet3(**options_metnet)
+            if self.context_embed_input_dim > 0:
+                self.context_embed = metnet.MetNet3(**options_metnet)
 
-            options_metnet["dim_in"] = 1 * local_input_dim
+            options_metnet["dim_in"] = 1 * self.local_input_dim
             options_metnet["out_conv"] = n_predict
             self.local_embed = metnet.MetNet3(**options_metnet)
         elif backbone == "3dunet":
-            self.context_embed = unet3d.UNet3D(
-                input_dim=context_embed_input_dim,
-                out_conv=context_embed_output_dim,
-                cond_dim=lead_time_dim,
-                op_type="3d",
-                cond_norm_affine=cond_norm_affine,
-            )
+            if self.context_embed_input_dim > 0:
+                self.context_embed = unet3d.UNet3D(
+                    input_dim=self.context_embed_input_dim,
+                    out_conv=context_embed_output_dim,
+                    cond_dim=lead_time_dim,
+                    op_type="3d",
+                    cond_norm_affine=cond_norm_affine,
+                )
             self.local_embed = unet3d.UNet3D(
-                input_dim=local_input_dim,
+                input_dim=self.local_input_dim,
                 out_conv=n_predict,
                 cond_dim=lead_time_dim,
                 op_type="2d",
                 cond_norm_affine=cond_norm_affine,
             )
         elif backbone == "LR":
-            self.context_embed = None
-            self.local_embed = lr_model.LogisticRegression(n_channels=local_input_dim - context_embed_output_dim + 1, out_channels=n_predict)
+            assert self.context_embed_input_dim == 0, "Logistic regression is local-only"
+            self.local_embed = lr_model.LogisticRegression(
+                n_channels=self.local_input_dim, out_channels=n_predict
+            )
         elif backbone == "Context+LR":
-            self.context_embed = None # put your best model here
-            self.local_embed = lr_model.LogisticRegression(n_channels=local_input_dim, out_channels=n_predict)
+            self.context_embed = None  # TODO: put your best model here
+            self.local_embed = lr_model.LogisticRegression(
+                n_channels=self.local_input_dim + context_embed_output_dim, out_channels=n_predict
+            )
         else:
             raise NotImplementedError(f"Unknown model name: {backbone}")
 
@@ -286,25 +292,32 @@ class ModelBackbones(nn.Module):
             return None
 
     def forward(self, ex):
-        B, N, cC, cH, cW = ex["era5"].shape
-        batch_positions = torch.arange(0, N).reshape((1, N)).repeat((B, 1)).to(ex["era5"].device)
         if self.w_s1:
             example_local = ex["s1"]
         else:
             example_local = ex["dem_local"]
-        fH, fW = example_local.shape[-2:]
+        B, _, fH, fW = example_local.shape
+        if self.normalise_using_batch and B <= 4:
+            warnings.warn(
+                "WARNING: This model has been set to normalise using batch statistics. "
+                "Small batch might have issues."
+            )
 
         # Normalise inputs
         era5_inp = self.normalise(ex, "era5")
         era5l_inp = self.normalise(ex, "era5_land")
+        glofas_inp = self.normalise(ex, "glofas")
         hydroatlas_inp = self.normalise(ex, "hydroatlas_basin")
         dem_context_inp = self.normalise(ex, "dem", "context")
+        derived_landsea_context = self.derive_landsea(dem_context_inp)
         dem_local_inp = self.normalise(ex, "dem", "local")
+        derived_landsea_local = self.derive_landsea(dem_local_inp)
         hand_inp = self.normalise(ex, "hand")
         s1_inp = self.normalise(ex, "s1")
 
         # These inputs might have nan
         era5l_inp = nans_to_zero(era5l_inp)
+        glofas_inp = nans_to_zero(glofas_inp)
         hydroatlas_inp = nans_to_zero(hydroatlas_inp)
         dem_context_inp = nans_to_zero(dem_context_inp)
         dem_local_inp = nans_to_zero(dem_local_inp)
@@ -318,42 +331,61 @@ class ModelBackbones(nn.Module):
             lead = None
 
         # Process context inputs
-        context_statics_lst = []
-        if self.w_hydroatlas_basin:
-            embedded_hydro_atlas_raster = self.hydro_atlas_embed(hydroatlas_inp)
-            context_statics_lst.append(embedded_hydro_atlas_raster)
-        if self.w_dem_context:
-            context_statics_lst.append(dem_context_inp)
-        # Add the statics in at every step
-        context_lst = [era5_inp]
-        if self.w_era5_land:
-            context_lst.insert(0, era5l_inp)
-        if self.w_hydroatlas_basin or self.w_dem_context:
-            context_statics = (
-                torch.cat(context_statics_lst, dim=1).unsqueeze(1).repeat((1, N, 1, 1, 1))
+        if self.context_embed_input_dim > 0:
+            context_exemplar = "era5" if self.w_era5 else "era5_land"
+            B, N, _, cH, cW = ex[context_exemplar].shape
+            batch_positions = (
+                torch.arange(0, N).reshape((1, N)).repeat((B, 1)).to(ex[context_exemplar].device)
             )
-            context_lst.append(context_statics)
-        context_inp = torch.cat(context_lst, dim=2)
-        context_embedded = self.context_embed(
-            context_inp, batch_positions=batch_positions, lead=lead
-        )
-        if self.backbone != "3dunet":
-            context_embedded = context_embedded[:, 0]
+            context_statics_lst = []
+            if self.w_hydroatlas_basin:
+                embedded_hydro_atlas_raster = self.hydro_atlas_embed(hydroatlas_inp)
+                context_statics_lst.append(embedded_hydro_atlas_raster)
+            if self.w_dem_context:
+                context_statics_lst.append(dem_context_inp)
+                if self.derive_land_sea_from_dem:
+                    context_statics_lst.append(derived_landsea_context)
+            # Add the statics in at every step
+            context_lst = []
+            if self.w_era5_land:
+                context_lst.append(era5l_inp)
+            if self.w_era5:
+                context_lst.append(era5_inp)
+            if self.w_glofas:
+                context_lst.append(glofas_inp)
+            if self.w_hydroatlas_basin or self.w_dem_context:
+                context_statics = (
+                    torch.cat(context_statics_lst, dim=1).unsqueeze(1).repeat((1, N, 1, 1, 1))
+                )
+                context_lst.append(context_statics)
+            context_inp = torch.cat(context_lst, dim=2)
+            context_embedded = self.context_embed(
+                context_inp, batch_positions=batch_positions, lead=lead
+            )
+            if self.backbone != "3dunet":
+                context_embedded = context_embedded[:, 0]
 
-        # Select the central 2x2 pixels and average
-        if self.center_crop_context:
-            ylo, yhi = cH // 2 - 1, cH // 2 + 3
-            xlo, xhi = cW // 2 - 1, cW // 2 + 3
+            # Select the central 2x2 pixels and average
+            if self.center_crop_context:
+                ylo, yhi = cH // 2 - 1, cH // 2 + 3
+                xlo, xhi = cW // 2 - 1, cW // 2 + 3
+            else:
+                ylo, yhi = 0, cH
+                xlo, xhi = 0, cW
+            context_out = context_embedded[:, :, ylo:yhi, xlo:xhi]
+            if self.average_context:
+                context_out = context_out.mean(axis=(2, 3), keepdims=True)
+            context_out_upsc = F.interpolate(context_out, size=(fH, fW), mode="nearest")
+
+            # Context prepared for
+            local_lst = [context_out_upsc]
         else:
-            ylo, yhi = 0, cH
-            xlo, xhi = 0, cW
-        context_out = context_embedded[:, :, ylo:yhi, xlo:xhi]
-        if self.average_context:
-            context_out = context_out.mean(axis=(2, 3), keepdims=True)
-        context_out_upsc = F.interpolate(context_out, size=(fH, fW), mode="nearest")
+            batch_positions = (
+                torch.arange(0, 1).reshape((1, 1)).repeat((B, 1)).to(example_local.device)
+            )
+            local_lst = []
 
         # Process local inputs
-        local_lst = [context_out_upsc]
         if self.w_s1:
             local_lst.append(s1_inp)
         if self.w_dem_local:
@@ -362,11 +394,10 @@ class ModelBackbones(nn.Module):
             local_lst.append(hand_inp)
         local_inp = torch.cat(local_lst, dim=1)
         # Pretend it's temporal data with one time step
-        if self.backbone != "LR":
-            local_inp = local_inp[:, None]
+        local_inp = local_inp[:, None]
         out = self.local_embed(local_inp, batch_positions=batch_positions[:, :1], lead=lead)
-                
-        if self.backbone not in ["3dunet", "LR", "Context+LR"]:
+
+        if self.backbone not in ["3dunet"]:
             out = out[:, 0]
         return out
 
@@ -401,16 +432,23 @@ if __name__ == "__main__":
         {},
         {"w_era5": False},
         {"w_era5_land": False},
-        {"w_glofas": False},
+        {"w_glofas": True},
         {"w_hydroatlas_basin": False},
         {"w_dem_context": False},
         {"w_s1": False},
         {"w_dem_local": False},
         {"w_hand": False},
+        {
+            "w_era5": False,
+            "w_era5_land": False,
+            "w_glofas": False,
+            "w_hydroatlas_basin": False,
+            "w_dem_context": False,
+        },
     ]
 
     for d in to_remove:
-        for backbone in ["utae", "recunet_lstm", "metnet", "3dunet", "LR"]:
+        for backbone in ["utae", "recunet_lstm", "metnet", "3dunet"]:
             if d.get("w_s1", True):
                 lead = {"lead_time_dim": lead_time_dim}
             else:
@@ -429,3 +467,16 @@ if __name__ == "__main__":
             out = model(ex)
             assert out.shape == (8, 3, 224, 224)
             print("🗸", end="")
+    model = ModelBackbones(
+        era5_bands,
+        era5l_bands,
+        glofas_bands,
+        hydroatlas_bands,
+        hydroatlas_dim,
+        **lead,
+        **to_remove[-1],
+        weather_window_size=T,
+        backbone="LR",
+    )
+    print("🗸", end="")
+    print()

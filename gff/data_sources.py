@@ -404,6 +404,7 @@ def _era5_data_ram(fpath: Path, band_idxs: tuple):
 def load_exported_era5(
     fpath: Path,
     geom: shapely.Geometry,
+    res: tuple[int, int],
     start: datetime.datetime,
     end: datetime.datetime,
     keys: list[str],
@@ -421,15 +422,17 @@ def load_exported_era5(
     band_idxs = tuple([band_index[day_str][k] for day_str in day_strs for k in keys])
 
     if cache_in_ram:
-        arr, transform = _era5_data_ram(fpath, band_idxs)
-        bounds_px = util.convert_affine(geom, ~transform).bounds
-        data = util.resample_bilinear_subpixel(arr, bounds_px)
+        tif = util.tif_data_ram(fpath)
     else:
-        with rasterio.open(fpath) as tif:
-            T = tif.transform
-            window = util.shapely_bounds_to_rasterio_window(geom.bounds, T, align=False)
-            method = rasterio.enums.Resampling.bilinear
-            data = tif.read(band_idxs, window=window, resampling=method)
+        tif = rasterio.open(fpath)
+
+    T = tif.transform
+    window = util.shapely_bounds_to_rasterio_window(geom.bounds, T, align=False)
+    method = rasterio.enums.Resampling.bilinear
+    data = tif.read(band_idxs, window=window, out_shape=res, resampling=method)
+
+    if not cache_in_ram:
+        tif.close()
 
     data = einops.rearrange(data, "(I B) H W -> I B H W", I=len(day_strs), B=len(keys))
 

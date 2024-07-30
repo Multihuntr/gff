@@ -108,9 +108,10 @@ class ModelBackbones(nn.Module):
         self.average_context = average_context
         self.backbone = backbone
         self.normalise_using_batch = normalise_using_batch
-        self.hydroatlas_class_mask = [
-            (band.split("_")[1] in ["cl", "id"]) for band in self.hydroatlas_bands
-        ]
+        if self.normalise_using_batch:
+            self.hydroatlas_class_mask = [
+                (band.split("_")[1] in ["cl", "id"]) for band in self.hydroatlas_bands
+            ]
 
         # Store normalisation info on model
         # (To load model weights, the shapes must be identical; so use empty if not known at init)
@@ -129,7 +130,11 @@ class ModelBackbones(nn.Module):
             self.w_s1 or self.w_dem_local or self.w_hand
         ), "Must provide one of s1, dem local or hand to produce local scale predictions"
         assert (
-            self.w_era5 or self.w_era5_land or self.w_hydroatlas_basin or self.w_dem_context
+            self.w_era5
+            or self.w_era5_land
+            or self.w_glofas
+            or self.w_hydroatlas_basin
+            or self.w_dem_context
         ), "Must provide one of era5, era5-land, glofas, dem context or hydroatlas to produce context scale predictions"
         assert (self.w_s1 and (lead_time_dim is not None)) or (
             (not self.w_s1) and (lead_time_dim is None)
@@ -477,10 +482,12 @@ if __name__ == "__main__":
     hydroatlas_dim = 16
     n_era5 = 16
     n_era5_land = 8
+    n_glofas = 3
     lead_time_dim = 16
     ex = {
         "era5": torch.randn((B, T, n_era5, cH, cW)).cuda(),
         "era5_land": torch.randn((B, T, n_era5_land, cH, cW)).cuda(),
+        "glofas": torch.randn((B, T, n_glofas, cH, cW)).cuda(),
         "hydroatlas_basin": torch.randn((B, n_hydroatlas, cH, cW)).cuda(),
         "dem_context": torch.randn((B, 1, cH, cW)).cuda(),
         "s1": torch.randn(B, 2, fH, fW).cuda(),
@@ -490,9 +497,13 @@ if __name__ == "__main__":
     }
     era5_bands = list(range(n_era5))
     era5l_bands = list(range(n_era5_land))
+    glofas_bands = list(range(n_glofas))
     hydroatlas_bands = list(range(n_hydroatlas))
     to_remove = [
         {},
+        {"w_era5": False},
+        {"w_era5_land": False},
+        {"w_glofas": False},
         {"w_hydroatlas_basin": False},
         {"w_dem_context": False},
         {"w_s1": False},
@@ -509,6 +520,7 @@ if __name__ == "__main__":
             model = ModelBackbones(
                 era5_bands,
                 era5l_bands,
+                glofas_bands,
                 hydroatlas_bands,
                 hydroatlas_dim,
                 **lead,

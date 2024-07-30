@@ -4,7 +4,7 @@
 
 A globally distributed dataset for learning flood forecasting featuring both generated and labelled flood maps.
 
-Download here: TODO
+Download here: [Zenodo](https://zenodo.org/records/11380970)
 
 # This repository
 
@@ -40,3 +40,7 @@ To cite us, use:
 ```
 TBD
 ```
+
+# Acknowledgements
+
+This project was initiated at [Φ-lab](https://philab.esa.int/) at ESRIN, when @Multihuntr (Brandon Victor) temporarily joined as a visiting researcher. Thanks to [SmartSatCRC](https://smartsatcrc.com/) for funding the visit, and to Φ-lab for hosting the visit.

@@ -23,6 +23,11 @@ class DebugFloodForecastDataset(torch.utils.data.Dataset):
         self.n_times = C["n_times"]
         self.data_sources = C["data_sources"]
 
+        if C["half_res_context"]:
+            c_res = 16
+        else:
+            c_res = 32
+
         self.bogus_geom = shapely.Point([124.225, 9.9725])
         if C["checkerboard"]:
             self.floodmaps = np.zeros((self.n_examples, 1, 224, 224), dtype=np.int64)
@@ -34,21 +39,23 @@ class DebugFloodForecastDataset(torch.utils.data.Dataset):
 
         if "era5" in C["data_sources"]:
             n_era5 = len(C["era5_keys"])
-            self.era5 = np.random.randn(self.n_examples, self.n_times, n_era5, 32, 32)
+            self.era5 = np.random.randn(self.n_examples, self.n_times, n_era5, c_res, c_res)
             self.era5 = self.era5.astype(np.float32)
 
         if "era5_land" in C["data_sources"]:
             n_era5_land = len(C["era5_land_keys"])
-            self.era5_land = np.random.randn(self.n_examples, self.n_times, n_era5_land, 32, 32)
+            self.era5_land = np.random.randn(
+                self.n_examples, self.n_times, n_era5_land, c_res, c_res
+            )
             self.era5_land = self.era5_land.astype(np.float32)
 
         if "hydroatlas_basin" in C["data_sources"]:
             n_hydroatlas = len(C["hydroatlas_keys"])
-            self.hydroatlas_basin = np.random.randn(self.n_examples, n_hydroatlas, 32, 32)
+            self.hydroatlas_basin = np.random.randn(self.n_examples, n_hydroatlas, c_res, c_res)
             self.hydroatlas_basin = self.hydroatlas_basin.astype(np.float32)
 
         if "dem_context" in C["data_sources"]:
-            self.dem_context = np.random.randn(self.n_examples, 1, 32, 32)
+            self.dem_context = np.random.randn(self.n_examples, 1, c_res, c_res)
             self.dem_context = self.dem_context.astype(np.float32)
         if "dem_local" in C["data_sources"]:
             self.dem_local = np.random.randn(self.n_examples, 1, 224, 224)
@@ -96,7 +103,11 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         self.dem_nodata = None
 
     def mk_context_geom(self, geom: shapely.Geometry):
-        w = h = gff.constants.CONTEXT_DEGREES
+        if self.C["half_res_context"]:
+            degrees = gff.constants.CONTEXT_DEGREES / 2
+        else:
+            degrees = gff.constants.CONTEXT_DEGREES
+        w = h = degrees
         lon, lat = shapely.get_coordinates(geom.centroid)[0]
         lonlo, latlo = lon - w / 2, lat + h / 2
         lonhi, lathi = lon + w / 2, lat - h / 2
@@ -146,7 +157,11 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         floodmap_path = self.floodmap_path / meta["floodmap"]
         hybas_key = "HYBAS_ID" if "HYBAS_ID" in meta else "HYBAS_ID_4"
         continent = int(str(meta[hybas_key])[0])
-        context_res = (gff.constants.CONTEXT_RESOLUTION,) * 2
+        if self.C["half_res_context"]:
+            context_res = (gff.constants.CONTEXT_RESOLUTION // 2,) * 2
+        else:
+            context_res = (gff.constants.CONTEXT_RESOLUTION,) * 2
+
         cache_local = self.C["cache_local_in_ram"]
 
         targ = gff.util.get_tile(floodmap_path, geom.bounds, align=True, cache=cache_local)
@@ -165,13 +180,14 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         # Add in various data sources
         # Weather data
         future_name = gff.constants.KUROSIWO_S1_NAMES[-1]
-        weather_end = datetime.datetime.fromisoformat(meta[f"{future_name}_date"])
+        weather_end = datetime.datetime.fromisoformat(meta[f"{future_name}_date"].rstrip("Z"))
         weather_start = weather_end - datetime.timedelta(days=(self.C["weather_window"] - 1))
         if "era5_land" in self.C["data_sources"]:
             fpath = floodmap_path.with_name(floodmap_path.stem + "-era5-land.tif")
             data = gff.data_sources.load_exported_era5(
                 fpath,
                 context_geom,
+                context_res,
                 weather_start,
                 weather_end,
                 keys=self.C["era5_land_keys"],
@@ -184,6 +200,7 @@ class FloodForecastDataset(torch.utils.data.Dataset):
             data = gff.data_sources.load_exported_era5(
                 fpath,
                 context_geom,
+                context_res,
                 weather_start,
                 weather_end,
                 keys=self.C["era5_keys"],
@@ -191,6 +208,20 @@ class FloodForecastDataset(torch.utils.data.Dataset):
             )
             result["era5"] = np.array(data, dtype=np.float32)
             result["fpaths"]["era5"] = fpath
+        if "glofas" in self.C["data_sources"]:
+            d_str = weather_end.strftime("%Y-%m-%d")
+            fpath = self.floodmap_path / f"{meta['key']}_{d_str}.nc"
+            data = gff.data_sources.load_glofas(
+                fpath,
+                context_geom,
+                context_res,
+                weather_start,
+                weather_end,
+                bands=self.C["glofas_keys"],
+                cache_in_ram=self.C["cache_context_in_ram"],
+            )
+            result["glofas"] = np.array(data, dtype=np.float32)
+            result["fpaths"]["glofas"] = fpath
 
         # (Relatively) static soil attributes
         if "hydroatlas_basin" in self.C["data_sources"]:

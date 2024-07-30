@@ -404,6 +404,7 @@ def _era5_data_ram(fpath: Path, band_idxs: tuple):
 def load_exported_era5(
     fpath: Path,
     geom: shapely.Geometry,
+    res: tuple[int, int],
     start: datetime.datetime,
     end: datetime.datetime,
     keys: list[str],
@@ -421,15 +422,17 @@ def load_exported_era5(
     band_idxs = tuple([band_index[day_str][k] for day_str in day_strs for k in keys])
 
     if cache_in_ram:
-        arr, transform = _era5_data_ram(fpath, band_idxs)
-        bounds_px = util.convert_affine(geom, ~transform).bounds
-        data = util.resample_bilinear_subpixel(arr, bounds_px)
+        tif = util.tif_data_ram(fpath)
     else:
-        with rasterio.open(fpath) as tif:
-            T = tif.transform
-            window = util.shapely_bounds_to_rasterio_window(geom.bounds, T, align=False)
-            method = rasterio.enums.Resampling.bilinear
-            data = tif.read(band_idxs, window=window, resampling=method)
+        tif = rasterio.open(fpath)
+
+    T = tif.transform
+    window = util.shapely_bounds_to_rasterio_window(geom.bounds, T, align=False)
+    method = rasterio.enums.Resampling.bilinear
+    data = tif.read(band_idxs, window=window, out_shape=res, resampling=method)
+
+    if not cache_in_ram:
+        tif.close()
 
     data = einops.rearrange(data, "(I B) H W -> I B H W", I=len(day_strs), B=len(keys))
 
@@ -487,3 +490,59 @@ def ks_water_stats(tile: np.ndarray):
     pwater = tile == constants.KUROSIWO_PW_CLASS
     bg = tile == constants.KUROSIWO_BG_CLASS
     return bg.sum(), pwater.sum(), flood.sum()
+
+
+def load_glofas(
+    fpath: Path,
+    geom: shapely.Geometry,
+    res: tuple[int, int],
+    start: datetime.datetime,
+    end: datetime.datetime,
+    bands: list[str] = ["dis24", "rowe", "swir"],
+    cache_in_ram: bool = False,
+):
+    if cache_in_ram:
+        ds = util.nc_data_ram(fpath)
+    else:
+        ds = xarray.open_dataset(fpath)
+
+    # GloFAS is sometimes in in 0-360, but geom is always in -180-180
+    # (When the area contained within the site crosses the 0-360 boundary,
+    #   GloFAS uses negatives to ensure contiguous indices)
+    xlo, ylo, xhi, yhi = geom.bounds
+    lon_lo, lon_hi = ds.longitude.min().item(), ds.longitude.max().item()
+    if lon_lo > 180:
+        xlo, ylo, xhi, yhi = (xlo + 360, ylo, xhi + 360, yhi)
+
+    # The end date is whenever the S1 image was taken (middle of the day)
+    # But the dates in glofas are set at the first second of the day
+    # So to include the correct number of days, we need to add a one-day buffer.
+    # E.g. start is day 54.3 and end is day 74.3, and glofas "days" are at:
+    #   54.0, 55.0, 56.0, 57.0, etc.
+    # We need to include a date range of [53.3, 74.3]
+    # (Note I've used fractional days here for illustration only, really they're datetime objects)
+    start_incl_first = start - datetime.timedelta(days=1)
+    subset_ds = ds.sel(
+        time=slice(start_incl_first, end),
+        longitude=slice(xlo, xhi),
+        latitude=(slice(yhi, ylo)),
+    )
+
+    # Normal image resampling doesn't work for GloFAS because it's actually a single-pixel-width
+    # path represented in an image. Consider a 2x2 influence for each output pixel. The magnitude
+    # of the output pixel is then dependent on whether it includes 1, 2 or 3 pixels from the path.
+    # Instead, we'll run a naive majority filter on each 2x2.
+    width = getattr(subset_ds, bands[0]).values.shape[-1]
+    subset_np = np.stack([getattr(subset_ds, band).values for band in bands], axis=1)
+    width = subset_np.shape[-1]
+    assert (
+        res[1] == width or res[1] == width / 2
+    ), "GloFAS custom resampling only works on full or half resolution"
+    if res[1] == width / 2:
+        c00 = subset_np[:, :, ::2, ::2]
+        c01 = subset_np[:, :, ::2, 1::2]
+        c10 = subset_np[:, :, 1::2, ::2]
+        c11 = subset_np[:, :, 1::2, 1::2]
+        subset_np = np.stack([c00, c01, c10, c11], axis=0).max(axis=0)
+
+    return subset_np

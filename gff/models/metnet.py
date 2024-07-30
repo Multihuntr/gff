@@ -143,10 +143,10 @@ def Upsample2x(dim, dim_out = None):
 # conditionable resnet block
 
 class Block(Module):
-    def __init__(self, dim, dim_out):
+    def __init__(self, dim, dim_out, norm_affine=True):
         super().__init__()
         self.proj = nn.Conv2d(dim, dim_out, 3, padding = 1)
-        self.norm = ChanLayerNorm(dim_out)
+        self.norm = ChanLayerNorm(dim_out, affine=norm_affine)
         self.act = nn.ReLU()
 
     def forward(self, x, scale_shift = None):
@@ -166,7 +166,8 @@ class ResnetBlock(Module):
         dim,
         dim_out = None,
         *,
-        cond_dim = None
+        cond_dim = None,
+        cond_norm_affine = True,
     ):
         super().__init__()
         dim_out = default(dim_out, dim)
@@ -178,7 +179,7 @@ class ResnetBlock(Module):
                 nn.Linear(cond_dim, dim_out * 2)
             )
 
-        self.block1 = Block(dim, dim_out)
+        self.block1 = Block(dim, dim_out, norm_affine=cond_norm_affine)
         self.block2 = Block(dim_out, dim_out)
         self.res_conv = nn.Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
 
@@ -206,14 +207,20 @@ class ResnetBlocks(Module):
         *,
         dim_in = None,
         depth = 1,
-        cond_dim = None
+        cond_dim = None,
+        cond_norm_affine = True,
     ):
         super().__init__()
         curr_dim = default(dim_in, dim)
 
         blocks = []
         for _ in range(depth):
-            blocks.append(ResnetBlock(dim = curr_dim, dim_out = dim, cond_dim = cond_dim))
+            blocks.append(ResnetBlock(
+                dim = curr_dim,
+                dim_out = dim,
+                cond_dim = cond_dim,
+                cond_norm_affine = cond_norm_affine
+            ))
             curr_dim = dim
 
         self.blocks = ModuleList(blocks)
@@ -244,16 +251,21 @@ class RMSNorm(Module):
 # they use layernorms after the conv in the resnet blocks for some reason
 
 class ChanLayerNorm(nn.Module):
-    def __init__(self, dim, eps = 1e-5):
+    def __init__(self, dim, affine=True, eps = 1e-5):
         super().__init__()
+        self.affine = affine if affine is not None else True
         self.eps = eps
-        self.g = nn.Parameter(torch.ones(1, dim, 1, 1))
-        self.b = nn.Parameter(torch.zeros(1, dim, 1, 1))
+        if self.affine:
+            self.g = nn.Parameter(torch.ones(1, dim, 1, 1))
+            self.b = nn.Parameter(torch.zeros(1, dim, 1, 1))
 
     def forward(self, x):
         var = torch.var(x, dim = 1, unbiased = False, keepdim = True)
         mean = torch.mean(x, dim = 1, keepdim = True)
-        return (x - mean) * var.clamp(min = self.eps).rsqrt() * self.g + self.b
+        out = (x - mean) * var.clamp(min = self.eps).rsqrt()
+        if self.affine:
+            out = out * self.g + self.b
+        return out
 
 # MBConv
 
@@ -686,7 +698,8 @@ class MetNet3(Module):
         # input_2496_channels = 2 + 14 + 1 + 2 + 20,
         dim_in=40,
         resnet_block_depth = 2,
-        out_conv=2
+        out_conv=2,
+        cond_norm_affine=True,
     ):
         super().__init__()
 
@@ -705,6 +718,7 @@ class MetNet3(Module):
             dim = dim,
             dim_in = dim_in,
             cond_dim = lead_time_embed_dim,
+            cond_norm_affine = cond_norm_affine,
             depth = resnet_block_depth
         )
 
@@ -728,6 +742,7 @@ class MetNet3(Module):
             dim = dim,
             dim_in = dim_in_8km,
             cond_dim = lead_time_embed_dim,
+            cond_norm_affine = cond_norm_affine,
             depth = resnet_block_depth
         )
 
@@ -755,6 +770,7 @@ class MetNet3(Module):
             dim = dim,
             dim_in = dim + dim_in_8km,
             cond_dim = lead_time_embed_dim,
+            cond_norm_affine = cond_norm_affine,
             depth = resnet_block_depth
         )
 
@@ -769,6 +785,7 @@ class MetNet3(Module):
             dim = dim,
             dim_in = dim_in + dim,
             cond_dim = lead_time_embed_dim,
+            cond_norm_affine = cond_norm_affine,
             depth = resnet_block_depth
         )
 

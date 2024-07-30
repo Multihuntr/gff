@@ -20,6 +20,10 @@ def get_era5_land_norm(folder: Path, keys: list[str]):
     return get_norm_w_keys(folder / "normalisation" / "era5_land_norm.csv", keys)
 
 
+def get_glofas_norm(folder: Path, fold: int, keys: list[str]):
+    return get_norm_w_keys(folder / "normalisation" / f"glofas_norm_{fold}.csv", keys)
+
+
 def get_hydroatlas_norm(folder: Path, keys: list[str]):
     return get_norm_w_keys(folder / "normalisation" / "hydroatlas_norm.csv", keys)
 

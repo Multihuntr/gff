@@ -2,33 +2,50 @@ seed: 6426452
 data_folder: ~/NFS_era5/gff
 device: cuda:0
 
-name: debug_everything
+name: two_recunet_and_no_era5
 
-model: debug_model
+model: two_backbones
+backbone: recunet_lstm
+hydroatlas_dim: 16
+lead_time_dim: 16
+context_embed_output_dim: 128
+center_crop_context: False
+average_context: False
+derive_land_sea_from_dem: False
+cond_norm_affine: null
+normalise_using_batch: False
 
-dataset: debug_dataset
-checkerboard: True
-n_examples: 4
-n_times: 12
+dataset: forecast_dataset
+fold: 0
+weather_window: 20
+cache_local_in_ram: False
+cache_context_in_ram: True
 data_sources:
-  - era5
   - era5_land
-  - hydroatlas_basin
-  - dem_context
-  - dem_local
-  - hand
   - s1
 
-n_classes: 3
+n_classes: 2
 half_res_context: False
-batch_size: 1
+batch_size: 16
 lr: 0.001
-lr_decay: 0.9999
-epochs: 200
-num_workers: 0
-scalar_freq: 2
-img_freq: 2
+lr_decay: 0.8
+epochs: 10
+num_workers: 2
+scalar_freq: 64
+img_freq: 32
+class_weights:
+  - 0.5
+  - 2
+  - 5
+augments:
+  - blur
+  - gaussian_noise
+  - hflip
 
+glofas_keys:
+  - dis24
+  - rowe
+  - swir
 hydroatlas_keys:
   - aet_mm_uyr
   - ari_ix_uav

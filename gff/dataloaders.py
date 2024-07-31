@@ -185,8 +185,8 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         weather_end = datetime.datetime.fromisoformat(meta[f"{future_name}_date"].rstrip("Z"))
         weather_start = weather_end - datetime.timedelta(days=(self.C["weather_window"] - 1))
         if "era5_land" in self.C["data_sources"]:
-            fpath = floodmap_path.with_name(floodmap_path.stem + "-era5-land.tif")
-            data = gff.data_sources.load_exported_era5(
+            fpath = floodmap_path.with_name(floodmap_path.stem + "-era5-land.nc")
+            data = gff.data_sources.load_exported_era5_nc(
                 fpath,
                 context_geom,
                 context_res,
@@ -198,8 +198,8 @@ class FloodForecastDataset(torch.utils.data.Dataset):
             result["era5_land"] = np.array(data, dtype=np.float32)
             result["fpaths"]["era5_land"] = fpath
         if "era5" in self.C["data_sources"]:
-            fpath = floodmap_path.with_name(floodmap_path.stem + "-era5.tif")
-            data = gff.data_sources.load_exported_era5(
+            fpath = floodmap_path.with_name(floodmap_path.stem + "-era5.nc")
+            data = gff.data_sources.load_exported_era5_nc(
                 fpath,
                 context_geom,
                 context_res,
@@ -295,7 +295,7 @@ def sometimes_things_are_lists(
             if key in as_list:
                 result[key].append(value)
             else:
-                result[key].append(torch.tensor(np.array(value)))
+                result[key].append(torch.as_tensor(np.asarray(value)))
     for key in keys:
         if key not in as_list:
             result[key] = torch.stack(result[key])

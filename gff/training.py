@@ -131,8 +131,8 @@ def make_augmentation(C):
         r = {**example}
         if "gaussian_noise" in C["augments"]:
             for k in C["data_sources"]:
-                ch_dim = 2 if len(r[k].shape) == 5 else 1
-                maxv = gff.util.nanop(r[k], dim=ch_dim, op=torch.max)
+                dim = (1, 3, 4) if len(r[k].shape) == 5 else (2, 3)
+                maxv = gff.util.torch_nanmax(r[k], dim=dim, keepdim=True)
                 r[k] = r[k] + torch.randn(r[k].shape, device=r[k].device) * maxv * 0.001
         if "blur" in C["augments"]:
             if random.random() < 0.3:

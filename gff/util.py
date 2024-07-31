@@ -202,8 +202,11 @@ def tif_data_ram(fpath: Path):
 
 
 @functools.cache
-def nc_data_ram(fpath: Path):
-    return xarray.open_dataset(fpath).compute()
+def nc_data_ram(fpath: Path, start: datetime.datetime = None, end: datetime.datetime = None):
+    ds = xarray.open_dataset(fpath)
+    if start is not None:
+        ds = ds.sel(time=slice(start, end))
+    return ds.compute()
 
 
 def _get_tile_cached(p, *args, **kwargs):
@@ -368,16 +371,29 @@ def seed_packages(seed):
     torch.backends.cudnn.benchmark = False
 
 
-def nanop(arr: torch.Tensor, dim: int, op: callable):
-    op_out_list = []
-    for c in range(arr.shape[dim]):
-        ch_data = torch.select(arr, dim, c)
-        nanmask = torch.isnan(ch_data)
-        op_out_list.append(op(ch_data[~nanmask]))
-    op_out_shp = [1 for _ in arr.shape]
-    op_out_shp[dim] = len(op_out_list)
-    op_out = torch.tensor(op_out_list, device=arr.device).reshape(op_out_shp)
-    return op_out
+# Torch nanops - https://github.com/pytorch/pytorch/issues/61474#issuecomment-1735537507
+def torch_nanmax(tensor, dim=None, keepdim=False):
+    min_value = torch.finfo(tensor.dtype).min
+    output = tensor.nan_to_num(min_value).amax(dim=dim, keepdim=keepdim)
+    return output
+
+
+def torch_nanmin(tensor, dim=None, keepdim=False):
+    max_value = torch.finfo(tensor.dtype).max
+    output = tensor.nan_to_num(max_value).amin(dim=dim, keepdim=keepdim)
+    return output
+
+
+def torch_nanvar(tensor, dim=None, keepdim=False):
+    tensor_mean = tensor.nanmean(dim=dim, keepdim=True)
+    output = (tensor - tensor_mean).square().nanmean(dim=dim, keepdim=keepdim)
+    return output
+
+
+def torch_nanstd(tensor, dim=None, keepdim=False):
+    output = torch_nanvar(tensor, dim=dim, keepdim=keepdim)
+    output = output.sqrt()
+    return output
 
 
 # The ol' misc. functions

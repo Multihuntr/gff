@@ -89,7 +89,7 @@ def create(C):
             center_crop_context=C["center_crop_context"],
             average_context=C["average_context"],
             backbone=C["backbone"],
-            normalise_using_batch=C["normalise_using_batch"],
+            nan_impute_val=C["nan_impute_val"],
             cond_norm_affine=C["cond_norm_affine"],
         )
     else:

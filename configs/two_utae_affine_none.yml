@@ -13,7 +13,7 @@ center_crop_context: False
 average_context: False
 derive_land_sea_from_dem: True
 cond_norm_affine: None
-normalise_using_batch: False
+nan_impute_val: 'zero'
 
 dataset: forecast_dataset
 fold: 0

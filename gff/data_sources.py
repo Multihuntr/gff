@@ -395,10 +395,19 @@ def load_era5(
 
 
 @functools.cache
-def _era5_data_ram(fpath: Path, band_idxs: tuple):
-    with rasterio.open(fpath) as tif:
-        data = tif.read(band_idxs)
-        return data, tif.transform
+def _era5_exported_band_idxs(
+    fpath: Path, start: datetime.datetime, end: datetime.datetime, keys: tuple[str]
+):
+    # Calculate the indices to read
+    band_index = _era5_band_index(fpath)
+    day_strs = []
+    current = start
+    while current <= end:
+        day_strs.append(current.strftime("%Y-%m-%d"))
+        current += datetime.timedelta(days=1)
+
+    band_idxs = tuple([band_index[day_str][k] for day_str in day_strs for k in keys])
+    return day_strs, band_idxs
 
 
 def load_exported_era5(
@@ -411,15 +420,7 @@ def load_exported_era5(
     cache_in_ram: bool = False,
 ):
     """For reading an exported raster already at the right resolution"""
-    # Calculate the indices to read
-    band_index = _era5_band_index(fpath)
-    day_strs = []
-    current = start
-    while current <= end:
-        day_strs.append(current.strftime("%Y-%m-%d"))
-        current += datetime.timedelta(days=1)
-
-    band_idxs = tuple([band_index[day_str][k] for day_str in day_strs for k in keys])
+    day_strs, band_idxs = _era5_exported_band_idxs(fpath, start, end, tuple(keys))
 
     if cache_in_ram:
         tif = util.tif_data_ram(fpath)
@@ -437,6 +438,44 @@ def load_exported_era5(
     data = einops.rearrange(data, "(I B) H W -> I B H W", I=len(day_strs), B=len(keys))
 
     return data
+
+
+def load_exported_era5_nc(
+    fpath: Path,
+    geom: shapely.Geometry,
+    res: tuple[int, int],
+    start: datetime.datetime,
+    end: datetime.datetime,
+    keys: list[str],
+    cache_in_ram: bool = False,
+):
+    """For reading an exported raster already at the right resolution"""
+    # The end date is whenever the S1 image was taken (middle of the day)
+    # But the dates in the data are the first second of the day.
+    if not (start.hour == 0 and start.minute == 0 and start.second == 0):
+        start_incl_first = start - datetime.timedelta(days=1)
+    else:
+        start_incl_first = start
+
+    if cache_in_ram:
+        ds = util.nc_data_ram(fpath, start_incl_first, end)
+    else:
+        ds = xarray.open_dataset(fpath)
+
+    # Get image data - offsets to match whatever rasterio was doing
+    xlo, xhi, ylo, yhi = geom.bounds
+    xlo += constants.ERA5L_DEGREES_PER_PIXEL / 4
+    ylo -= constants.ERA5L_DEGREES_PER_PIXEL / 4
+    xhi += constants.ERA5L_DEGREES_PER_PIXEL / 4
+    yhi -= constants.ERA5L_DEGREES_PER_PIXEL / 4
+    resample_ds = util.resample_xr(
+        ds, (xlo, xhi, ylo, yhi), res, "linear", "longitude", "latitude"
+    )
+    subset_np = np.stack(
+        [getattr(resample_ds, band).values for band in keys], axis=1, dtype=np.float32
+    )
+
+    return subset_np
 
 
 def load_pregenerated_raster(

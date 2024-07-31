@@ -12,12 +12,6 @@ import gff.models.logistic_regression as lr_model
 import gff.util
 
 
-def nans_to_zero(t: torch.Tensor | None):
-    if t is not None:
-        t[torch.isnan(t)] = 0
-        return t
-
-
 def get_empty_norms(era5_bands: int, era5l_bands: int, glofas_bands: int, hydroatlas_bands: int):
     return {
         "era5": (torch.zeros((1, 1, era5_bands, 1, 1)), torch.ones((1, 1, era5_bands, 1, 1))),
@@ -82,7 +76,7 @@ class ModelBackbones(nn.Module):
         center_crop_context=True,
         average_context=True,
         backbone="utae",
-        normalise_using_batch=False,
+        nan_impute_val="zero",
         cond_norm_affine=None,
     ):
         super().__init__()
@@ -104,11 +98,7 @@ class ModelBackbones(nn.Module):
         self.center_crop_context = center_crop_context
         self.average_context = average_context
         self.backbone = backbone
-        self.normalise_using_batch = normalise_using_batch
-        if self.normalise_using_batch:
-            self.hydroatlas_class_mask = [
-                (band.split("_")[1] in ["cl", "id"]) for band in self.hydroatlas_bands
-            ]
+        self.nan_impute_val = nan_impute_val
 
         # Store normalisation info on model
         # (To load model weights, the shapes must be identical; so use empty if not known at init)
@@ -255,25 +245,27 @@ class ModelBackbones(nn.Module):
             ex_key = key
         if ex_key in ex:
             data = ex[ex_key]
-            if self.normalise_using_batch:
-                # Different normalisation stats per channel,
-                # but channel is in a different position for different data
-                if len(data.shape) == 5:
-                    dims = (0, 1, 3, 4)
-                    ch_dim = 2
-                else:
-                    dims = (0, 2, 3)
-                    ch_dim = 1
-                mean = torch.nanmean(data, dim=dims, keepdim=True)
-                std = gff.util.nanop(data, dim=ch_dim, op=torch.std)
-                if key == "hydroatlas_basin":
-                    mean[:, self.hydroatlas_class_mask] = 0
-                    std[:, self.hydroatlas_class_mask] = 1
-            else:
-                mean = getattr(self, f"{key}_mean")
-                std = getattr(self, f"{key}_std")
+            mean = getattr(self, f"{key}_mean")
+            std = getattr(self, f"{key}_std")
             data = (data - mean) / std
             return data
+
+    def impute_nans(self, t: torch.Tensor | None):
+        if t is not None:
+            nan_mask = torch.isnan(t)
+            t[nan_mask] = 0
+            if self.nan_impute_val == "zero":
+                pass  # already done
+            elif self.nan_impute_val == "instance_mean":
+                # Different mean per batch instance and channel,
+                # but channel is in a different position for different data shapes
+                if len(t.shape) == 5:
+                    dim = (1, 3, 4)
+                else:
+                    dim = (2, 3)
+                val = torch.nanmean(t, dim=dim, keepdim=True)
+                t += nan_mask * val
+            return t
 
     def get_lead_time_idx(self, lead):
         # Get the index into the embedding based on lead.
@@ -297,11 +289,6 @@ class ModelBackbones(nn.Module):
         else:
             example_local = ex["dem_local"]
         B, _, fH, fW = example_local.shape
-        if self.normalise_using_batch and B <= 4:
-            warnings.warn(
-                "WARNING: This model has been set to normalise using batch statistics. "
-                "Small batch might have issues."
-            )
 
         # Normalise inputs
         era5_inp = self.normalise(ex, "era5")
@@ -316,12 +303,12 @@ class ModelBackbones(nn.Module):
         s1_inp = self.normalise(ex, "s1")
 
         # These inputs might have nan
-        era5l_inp = nans_to_zero(era5l_inp)
-        glofas_inp = nans_to_zero(glofas_inp)
-        hydroatlas_inp = nans_to_zero(hydroatlas_inp)
-        dem_context_inp = nans_to_zero(dem_context_inp)
-        dem_local_inp = nans_to_zero(dem_local_inp)
-        hand_inp = nans_to_zero(hand_inp)
+        era5l_inp = self.impute_nans(era5l_inp)
+        glofas_inp = self.impute_nans(glofas_inp)
+        hydroatlas_inp = self.impute_nans(hydroatlas_inp)
+        dem_context_inp = self.impute_nans(dem_context_inp)
+        dem_local_inp = self.impute_nans(dem_local_inp)
+        hand_inp = self.impute_nans(hand_inp)
 
         # Get Lead time embeddings
         if self.w_s1:

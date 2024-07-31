@@ -14,12 +14,13 @@ class LogisticRegression(nn.Module):
 
         self.model = nn.Conv2d(n_channels, out_channels, 3, padding=1, padding_mode="reflect")
 
-    def forward(self, x, lead=None, batch_positions=None):
+    def forward(self, x, batch_positions=None, lead=None):
         return self.model(x.squeeze(1))[:, None]
 
 
 def print_weights(model, feature_names):
-    tensors = model.local_embed.model.weight.cpu().detach().numpy()
+    print("Logistic regression model weights:\n")
+    tensors = model.model.weight.cpu().detach().numpy()
     nin, kh, kw, nout = tensors.shape
     weights = np.mean(tensors, axis=(1, 2))
     df = pd.DataFrame(weights, columns=[f"class {i+1}" for i in range(nout)], index=feature_names)

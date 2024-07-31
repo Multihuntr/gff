@@ -469,6 +469,8 @@ if __name__ == "__main__":
             out = model(ex)
             assert out.shape == (8, 3, 224, 224)
             print("🗸", end="")
+
+    lead = {"lead_time_dim": lead_time_dim}
     model = ModelBackbones(
         era5_bands,
         era5l_bands,
@@ -479,7 +481,9 @@ if __name__ == "__main__":
         **to_remove[-1],
         weather_window_size=T,
         backbone="LR",
-    )
+    ).cuda()
+    out = model(ex)
     assert out.shape == (8, 3, 224, 224)
     print("🗸", end="")
     print()
+    lr_model.print_weights(model.local_embed, ["S1 (0)", "S2 (0)", "HAND"])

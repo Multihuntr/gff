@@ -23,7 +23,7 @@ class DebugFloodForecastDataset(torch.utils.data.Dataset):
         self.n_times = C["n_times"]
         self.data_sources = C["data_sources"]
 
-        if C["half_res_context"]:
+        if C["half_extent_context"]:
             c_res = 16
         else:
             c_res = 32
@@ -103,7 +103,7 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         self.dem_nodata = None
 
     def mk_context_geom(self, geom: shapely.Geometry):
-        if self.C["half_res_context"]:
+        if self.C["half_extent_context"]:
             degrees = gff.constants.CONTEXT_DEGREES / 2
         else:
             degrees = gff.constants.CONTEXT_DEGREES
@@ -157,7 +157,9 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         floodmap_path = self.floodmap_path / meta["floodmap"]
         hybas_key = "HYBAS_ID" if "HYBAS_ID" in meta else "HYBAS_ID_4"
         continent = int(str(meta[hybas_key])[0])
-        if self.C["half_res_context"]:
+        if self.C["double_res_context"] and not self.C["half_extent_context"]:
+            context_res = (gff.constants.CONTEXT_RESOLUTION * 2,) * 2
+        elif not self.C["double_res_context"] and self.C["half_extent_context"]:
             context_res = (gff.constants.CONTEXT_RESOLUTION // 2,) * 2
         else:
             context_res = (gff.constants.CONTEXT_RESOLUTION,) * 2

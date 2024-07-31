@@ -1,5 +1,5 @@
 seed: 6426452
-data_folder: ~/NFS_era5/gff
+data_folder: ~/data/gff
 device: cuda:0
 
 name: two_recunet_and_no_hydroatlas
@@ -26,7 +26,8 @@ data_sources:
   - s1
 
 n_classes: 2
-half_res_context: True
+double_res_context: True
+half_extent_context: True
 batch_size: 16
 lr: 0.001
 lr_decay: 0.8

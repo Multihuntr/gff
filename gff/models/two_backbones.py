@@ -480,5 +480,6 @@ if __name__ == "__main__":
         weather_window_size=T,
         backbone="LR",
     )
+    assert out.shape == (8, 3, 224, 224)
     print("🗸", end="")
     print()

@@ -80,7 +80,8 @@ class CustomWriter:
             nans_to_min(r)
             r = rescale_channelwise(r)
             context_rasters.append(r)
-        self.writer.add_images("context", np.stack(context_rasters), self.count)
+        if len(context_rasters) > 0:
+            self.writer.add_images("context", np.stack(context_rasters), self.count)
 
         local_rasters = []
         if "dem_local" in ex:

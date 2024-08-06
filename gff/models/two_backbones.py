@@ -230,10 +230,18 @@ class ModelBackbones(nn.Module):
             self.local_embed = lr_model.LogisticRegression(
                 n_channels=self.local_input_dim, out_channels=n_predict
             )
-        elif backbone == "Context+LR":
-            self.context_embed = None  # TODO: put your best model here
+        elif backbone == "UTAE+LR":
+            self.context_embed = utae.UTAE(
+                self.context_embed_input_dim,
+                encoder_widths=[32, 32],
+                decoder_widths=[32, 32],
+                out_conv=[context_embed_output_dim],
+                cond_dim=lead_time_dim,
+                temp_encoding="ltae",
+                cond_norm_affine=cond_norm_affine,
+            )
             self.local_embed = lr_model.LogisticRegression(
-                n_channels=self.local_input_dim + context_embed_output_dim, out_channels=n_predict
+                n_channels=self.local_input_dim, out_channels=n_predict
             )
         else:
             raise NotImplementedError(f"Unknown model name: {backbone}")

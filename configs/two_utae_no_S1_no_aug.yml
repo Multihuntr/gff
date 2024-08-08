@@ -7,7 +7,7 @@ name: two_utae
 model: two_backbones
 backbone: utae
 hydroatlas_dim: 16
-lead_time_dim: 16
+lead_time_dim: null
 context_embed_output_dim: 128
 center_crop_context: False
 average_context: False

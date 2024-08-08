@@ -291,11 +291,24 @@ class ModelBackbones(nn.Module):
         else:
             return None
 
+    def get_context_shape(self, ex):
+        dynamics_keys = ["era5", "era5_land", "glofas"]
+        statics_keys = ["hydroatlas_basin", "dem_context"]
+        for dk in dynamics_keys:
+            if dk in ex:
+                B, N, _, cH, cW = ex[dk].shape
+                return B, N, cH, cW
+        for sk in statics_keys:
+            if sk in ex:
+                B, _, cH, cW = ex[sk].shape
+                N = 1
+                return B, N, cH, cW
+
     def forward(self, ex):
-        if self.w_s1:
-            example_local = ex["s1"]
-        else:
-            example_local = ex["dem_local"]
+        for k in ["s1", "dem_local", "hand"]:
+            if k in ex:
+                example_local = ex[k]
+                break
         B, _, fH, fW = example_local.shape
 
         # Normalise inputs
@@ -327,10 +340,9 @@ class ModelBackbones(nn.Module):
 
         # Process context inputs
         if self.context_embed_input_dim > 0:
-            context_exemplar = "era5" if self.w_era5 else "era5_land"
-            B, N, _, cH, cW = ex[context_exemplar].shape
+            B, N, cH, cW = self.get_context_shape(ex)
             batch_positions = (
-                torch.arange(0, N).reshape((1, N)).repeat((B, 1)).to(ex[context_exemplar].device)
+                torch.arange(0, N).reshape((1, N)).repeat((B, 1)).to(example_local.device)
             )
             context_statics_lst = []
             if self.w_hydroatlas_basin:

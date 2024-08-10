@@ -6,7 +6,11 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 from torchmetrics import MeanSquaredError
-from torchmetrics.classification import MulticlassF1Score, MulticlassConfusionMatrix
+from torchmetrics.classification import (
+    MulticlassF1Score,
+    MulticlassConfusionMatrix,
+    MulticlassJaccardIndex,
+)
 import tqdm
 
 import geopandas
@@ -140,6 +144,9 @@ def make_metrics(n_classes, device):
         "overall_f1": MulticlassF1Score(
             n_classes, average="none", ignore_index=-100, validate_args=False
         ).to(device),
+        "overall_iou": MulticlassJaccardIndex(
+            n_classes, average="none", ignore_index=-100, validate_args=False
+        ).to(device),
         "overall_count": 0,
         "continent_f1": {
             k: MulticlassF1Score(
@@ -171,6 +178,7 @@ def make_metrics(n_classes, device):
 
 def update_metrics(m, pred, targ, n_classes, continent, clim_zone, coast_mask):
     m["overall_f1"].update(pred, targ)
+    m["overall_iou"].update(pred, targ)
     m["overall_cm"].update(pred, targ)
     m["continent_f1"][continent].update(pred, targ)
     m["continent_counts"][continent] += 1
@@ -204,6 +212,7 @@ def compute_metrics(m, overall_count):
             "coast": tuple(f1v.item() for f1v in m["coast"].compute()),
             "inland": tuple(f1v.item() for f1v in m["inland"].compute()),
         },
+        "iou": tuple(iouv.item() for iouv in m["overall_iou"].compute()),
         "tilewise_mse": m["tilewise_mse"].compute().item(),
         "counts": {
             "overall": overall_count,

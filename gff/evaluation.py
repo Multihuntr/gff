@@ -8,6 +8,9 @@ import torch.utils.data
 from torchmetrics import MeanSquaredError
 from torchmetrics.classification import (
     MulticlassF1Score,
+    MulticlassRecall,
+    MulticlassPrecision,
+    MulticlassAccuracy,
     MulticlassConfusionMatrix,
     MulticlassJaccardIndex,
 )
@@ -144,6 +147,15 @@ def make_metrics(n_classes, device):
         "overall_f1": MulticlassF1Score(
             n_classes, average="none", ignore_index=-100, validate_args=False
         ).to(device),
+        "overall_precision": MulticlassPrecision(
+            n_classes, average="none", ignore_index=-100, validate_args=False
+        ).to(device),
+        "overall_recall": MulticlassRecall(
+            n_classes, average="none", ignore_index=-100, validate_args=False
+        ).to(device),
+        "overall_accuracy": MulticlassAccuracy(
+            n_classes, average="none", ignore_index=-100, validate_args=False
+        ).to(device),
         "overall_iou": MulticlassJaccardIndex(
             n_classes, average="none", ignore_index=-100, validate_args=False
         ).to(device),
@@ -178,6 +190,9 @@ def make_metrics(n_classes, device):
 
 def update_metrics(m, pred, targ, n_classes, continent, clim_zone, coast_mask):
     m["overall_f1"].update(pred, targ)
+    m["overall_precision"].update(pred, targ)
+    m["overall_recall"].update(pred, targ)
+    m["overall_accuracy"].update(pred, targ)
     m["overall_iou"].update(pred, targ)
     m["overall_cm"].update(pred, targ)
     m["continent_f1"][continent].update(pred, targ)
@@ -202,17 +217,20 @@ def update_metrics(m, pred, targ, n_classes, continent, clim_zone, coast_mask):
 def compute_metrics(m, overall_count):
     return {
         "f1": {
-            "overall": tuple(f1v.item() for f1v in m["overall_f1"].compute()),
+            "overall": tuple(v.item() for v in m["overall_f1"].compute()),
             "continent": {
-                k: tuple(f1v.item() for f1v in v.compute()) for k, v in m["continent_f1"].items()
+                k: tuple(v.item() for v in v.compute()) for k, v in m["continent_f1"].items()
             },
             "clim_zone": {
-                k: tuple(f1v.item() for f1v in v.compute()) for k, v in m["clim_zone_f1"].items()
+                k: tuple(v.item() for v in v.compute()) for k, v in m["clim_zone_f1"].items()
             },
-            "coast": tuple(f1v.item() for f1v in m["coast"].compute()),
-            "inland": tuple(f1v.item() for f1v in m["inland"].compute()),
+            "coast": tuple(v.item() for v in m["coast"].compute()),
+            "inland": tuple(v.item() for v in m["inland"].compute()),
         },
-        "iou": tuple(iouv.item() for iouv in m["overall_iou"].compute()),
+        "precision": tuple(v.item() for v in m["overall_precision"].compute()),
+        "recall": tuple(v.item() for v in m["overall_recall"].compute()),
+        "accuracy": tuple(v.item() for v in m["overall_accuracy"].compute()),
+        "iou": tuple(v.item() for v in m["overall_iou"].compute()),
         "tilewise_mse": m["tilewise_mse"].compute().item(),
         "counts": {
             "overall": overall_count,

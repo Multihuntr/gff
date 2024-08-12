@@ -19,7 +19,7 @@ dataset: forecast_dataset
 fold: 0
 weather_window: 20
 cache_local_in_ram: True
-cache_context_in_ram: False
+cache_context_in_ram: True
 data_sources:
   - era5
   - era5_land

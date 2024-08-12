@@ -461,6 +461,7 @@ def load_exported_era5_nc(
         ds = util.nc_data_ram(fpath, start_incl_first, end)
     else:
         ds = xarray.open_dataset(fpath)
+        ds = ds.sel(time=slice(start_incl_first, end))
 
     # Get image data - offsets to match whatever rasterio was doing
     xlo, xhi, ylo, yhi = geom.bounds

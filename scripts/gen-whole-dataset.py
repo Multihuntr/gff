@@ -181,7 +181,7 @@ def main(args):
     s1_index = sqlite3.connect(p, timeout=10)
     gff.generate.search.init_db(s1_index)
 
-    # Then we search through basins, ordered, and add them if there's not "enough"
+    # Create models used to generate floodmaps
     torch.set_grad_enabled(False)
     flood_model_names = args.flood_model_names
     flood_models = [
@@ -247,12 +247,9 @@ def main(args):
 
         # Remove tuplets that are too close to existing
         safe_tuplets = []
-        closes = []
         for tuplet in tuplets:
             close = gff.generate.util.s1_too_close(existing_maps, approach_results, tuplet[-1])
-            if close:
-                closes.append((tuplet[-1], closes))
-            else:
+            if not close:
                 safe_tuplets.append(tuplet)
         if len(safe_tuplets) == 0:
             print(f"{complete_str} | {key}: All S1 image tuplets are too close to existing ones.")

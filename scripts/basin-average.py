@@ -1,3 +1,7 @@
+raise NotImplementedError(
+    "This code is out of date, and not used. Especially check x/y before using this."
+)
+
 """
 I initially wrote some untested code to do basin-averaging. But then we decided
 that we might as well make functioning code.
@@ -20,9 +24,6 @@ The main points that I will change for a real project is to:
 If you see any important optimisations missing, please let me know.
 """
 
-raise NotImplementedError(
-    "This code is out of date, and not used. Especially check x/y before using this."
-)
 
 import argparse
 import sys

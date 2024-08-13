@@ -13,7 +13,7 @@ import gff.util as util
 
 
 def parse_args(argv):
-    parser = argparse.ArgumentParser("")
+    parser = argparse.ArgumentParser("Compares two folders of floodmaps/metas for similarity.")
 
     parser.add_argument("folder1", type=Path)
     parser.add_argument("folder2", type=Path)

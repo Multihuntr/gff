@@ -104,9 +104,9 @@ def tcs_basins(
     basins: geopandas.GeoDataFrame,
     tcs: geopandas.GeoDataFrame,
     tc_path: Path,
-    out_fpath: Path,
+    out_fpath: Path = None,
 ):
-    if out_fpath.exists():
+    if out_fpath is not None and out_fpath.exists():
         return geopandas.read_file(out_fpath)
 
     dfofmtstr = "%Y-%m-%d"
@@ -175,7 +175,10 @@ def tcs_basins(
     w_basin = pandas.merge(basins, tc_index, how="inner", on="HYBAS_ID")
     dfo_no_geom = pandas.DataFrame(dfo_orig.drop(columns="geometry"))
     out = pandas.merge(w_basin, dfo_no_geom, how="inner", on="ID")
-    out.to_file(out_fpath)
+
+    if out_fpath is not None:
+        out.to_file(out_fpath)
+
     return out
 
 

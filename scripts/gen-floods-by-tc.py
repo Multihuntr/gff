@@ -111,9 +111,9 @@ def main(args):
     n_covered = len(set(tcs_covered))
     print(f"Out of {len(all_tc)}")
     print(f"Tropical cyclones overlapping DFO: {n_covered}")
-    columns = ["FLOOD_ID", "HYBAS_ID", "BASIN", "YEAR", "STORMNAME"]
+    columns = ["FLOOD_ID", "HYBAS_ID", "YEAR", "BASIN", "STORMNAME"]
     out = pandas.DataFrame(coincide, columns=columns)
-    out.to_csv(args.out_path, index=False)
+    # out.to_csv(args.out_path, index=False)
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ import geopandas
 
 
 def parse_args(argv):
-    parser = argparse.ArgumentParser("")
+    parser = argparse.ArgumentParser("Counts the number of tiles/pixels in the dataset")
 
     parser.add_argument("data_path", type=Path)
     parser.add_argument("--only_kurosiwo", action="store_true")

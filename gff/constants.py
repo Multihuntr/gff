@@ -9,6 +9,7 @@ LAST_PRE_S1_NAME = KUROSIWO_S1_NAMES[-2]
 FLOODMAP_BLOCK_SIZE = 224
 WORLDCOVER_TREE_CLASS = 10
 WORLDCOVER_PW_CLASS = 80
+GSWE_STRICTEST_CLASS = 3
 # For some reason PACKBITS wasn't compressing very well.
 # Disk size scaled by regions of nodata.
 # Back to DEFLATE :shrug:

@@ -1,4 +1,5 @@
 import argparse
+import datetime
 import json
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ def parse_args(argv):
     parser = argparse.ArgumentParser("")
 
     parser.add_argument("data_path", type=Path)
+    parser.add_argument("--export", "-e", action="append", default=[])
 
     return parser.parse_args(argv)
 
@@ -72,21 +74,20 @@ def main(args):
         }
 
         # Export S1 files
-        s1_stem = gff.util.get_s1_stem_from_meta(meta)
-        s1_profile = {
-            **gff.constants.S1_PROFILE_DEFAULTS,
-            **spatial_profile,
-        }
-        s1_in_fpath = args.data_path / "s1" / f"{s1_stem}.tif"
-        if not s1_in_fpath.exists():
-            if meta["type"] == "kurosiwo":
-                s1_in_fpath = args.data_path / "s1" / "kurosiwo-merge" / f"{s1_stem}.tif"
+        if "s1" in args.export:
+            s1_stem = gff.util.get_s1_stem_from_meta(meta)
+            s1_profile = {
+                **gff.constants.S1_PROFILE_DEFAULTS,
+                **spatial_profile,
+            }
+            s1_in_fpath = args.data_path / "s1" / f"{s1_stem}.tif"
             if not s1_in_fpath.exists():
-                raise Exception("S1 couldn't be found")
-        s1_in_tif = rasterio.open(s1_in_fpath)
-        s1_out_fpath = meta_path.parent / f"{s1_stem}-s1.tif"
-        if not s1_out_fpath.exists():
-            tiles_to_remove = []
+                if meta["type"] == "kurosiwo":
+                    s1_in_fpath = args.data_path / "s1" / "kurosiwo-merge" / f"{s1_stem}.tif"
+                if not s1_in_fpath.exists():
+                    raise Exception("S1 couldn't be found")
+            s1_in_tif = rasterio.open(s1_in_fpath)
+            s1_out_fpath = meta_path.parent / f"{s1_stem}-s1.tif"
             with rasterio.open(s1_out_fpath, "w", **s1_profile) as s1_tif:
                 s1_tif.update_tags(**s1_in_tif.tags())
                 s1_tif.update_tags(1, **s1_in_tif.tags(1))
@@ -98,41 +99,53 @@ def main(args):
                     tile_in = gff.util.convert_crs(tile, visit_tiles.crs, s1_in_tif.crs)
                     s1_data = gff.util.get_tile(s1_in_tif, tile_in.bounds)
                     if np.isnan(s1_data).sum() != 0:
-                        tiles_to_remove.append(i)
-                        continue
+                        raise Exception("Should be no nan s1.")
                     window = gff.util.shapely_bounds_to_rasterio_window(
                         tile.bounds, s1_tif.transform
                     )
                     s1_tif.write(s1_data, window=window)
-            if len(tiles_to_remove) > 0:
-                visit_tiles = visit_tiles.drop(tiles_to_remove)
-                visit_tiles.to_file(v_path)
 
-        dem_fpath = floodmap_path.with_name(floodmap_path.stem + "-dem-local.tif")
-        fnc = gff.data_sources.get_dem
-        export_resample_by_fnc(
-            args.data_path, dem_fpath, fnc, spatial_profile, visit_tiles, max_error=0.5
-        )
+        if "dem" in args.export:
+            dem_fpath = floodmap_path.with_name(floodmap_path.stem + "-dem-local.tif")
+            fnc = gff.data_sources.get_dem
+            export_resample_by_fnc(
+                args.data_path, dem_fpath, fnc, spatial_profile, visit_tiles, max_error=0.5
+            )
 
-        hand_fpath = floodmap_path.with_name(floodmap_path.stem + "-hand.tif")
-        fnc = gff.data_sources.get_hand
-        export_resample_by_fnc(
-            args.data_path, hand_fpath, fnc, spatial_profile, visit_tiles, max_error=0.5
-        )
+        if "hand" in args.export:
+            hand_fpath = floodmap_path.with_name(floodmap_path.stem + "-hand.tif")
+            fnc = gff.data_sources.get_hand
+            export_resample_by_fnc(
+                args.data_path, hand_fpath, fnc, spatial_profile, visit_tiles, max_error=0.5
+            )
 
-        # wc_fpath = floodmap_path.with_name(floodmap_path.stem + "-worldcover.tif")
-        # fnc = gff.data_sources.get_world_cover
-        # wc_profile = {
-        #     **spatial_profile,
-        #     "COMPRESS": "LERC",
-        #     "MAX_Z_ERROR": 0,
-        #     "INTERLEAVE": "BAND",
-        #     "dtype": np.uint8,
-        #     'nodata': 0,
-        # }
-        # export_resample_by_fnc(
-        #     args.data_path, wc_fpath, fnc, wc_profile, visit_tiles, method="nearest"
-        # )
+        classification_spatial_profile = csp = {
+            **spatial_profile,
+            "COMPRESS": "LERC",
+            "MAX_Z_ERROR": 0,
+            "INTERLEAVE": "BAND",
+            "dtype": np.uint8,
+            "nodata": 0,
+        }
+        if "worldcover" in args.export:
+            wc_fpath = floodmap_path.with_name(floodmap_path.stem + "-worldcover.tif")
+            fnc = gff.data_sources.get_world_cover
+            export_resample_by_fnc(
+                args.data_path, wc_fpath, fnc, csp, visit_tiles, method="nearest"
+            )
+
+        if "gswe" in args.export:
+            gswe_fname = Path(meta["floodmap"]).with_name(floodmap_path.stem + "-gswe.tif")
+            gswe_fpath = args.data_path / "gswe-rois" / gswe_fname
+            flood_date = datetime.datetime.fromisoformat(meta["post_date"])
+            gswe_profile = {**csp, "nodata": 255}
+
+            def gswe_fnc(shp, crs, folder):
+                return gff.data_sources.get_global_surface_water(shp, crs, folder, date=flood_date)
+
+            export_resample_by_fnc(
+                args.data_path, gswe_fpath, gswe_fnc, csp, visit_tiles, method="nearest"
+            )
 
 
 if __name__ == "__main__":

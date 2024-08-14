@@ -44,8 +44,10 @@ def download_url(url, max_tries=3, verbose=False):
         try:
             with urllib.request.urlopen(url) as f:
                 return f.read()
-        except:
-            if i < (max_tries - 1):
+        except Exception as e:
+            if verbose:
+                print("Error", e)
+            elif i < (max_tries - 1):
                 print("Server returned error. Trying again in a few seconds.")
                 time.sleep(3)
     _tried[url] = True
@@ -54,7 +56,7 @@ def download_url(url, max_tries=3, verbose=False):
     raise URLNotAvailable()
 
 
-def degrees_to_north_east(north: int, east: int):
+def degrees_to_char(north: int, east: int):
     ns = "N"
     if north < 0:
         ns = "S"
@@ -63,6 +65,11 @@ def degrees_to_north_east(north: int, east: int):
     if east < 0:
         ew = "W"
         east = -east
+    return ns, ew, north, east
+
+
+def degrees_to_north_east(north: int, east: int):
+    ns, ew, north, east = degrees_to_char(north, east)
     return f"{ns}{north:02d}", f"{ew}{east:03d}"
 
 
@@ -163,6 +170,44 @@ def get_world_cover_file(north: int, east: int, folder: Path):
     return fpath
 
 
+def get_global_surface_water_file(
+    north: int,
+    east: int,
+    folder: Path,
+    date: datetime.datetime,
+    previous_year: bool = False,
+    ver: str = "LATEST",
+):
+    if previous_year:
+        # To get to the previous year, go to the first day of the year and subtract a day.
+        date = date.replace(month=1, day=1) - datetime.timedelta(days=1)
+    year = date.year
+    base_url = (
+        "https://jeodpp.jrc.ec.europa.eu/ftp/jrc-opendata/GSWE/"
+        + f"YearlyClassification/{ver}/tiles/yearlyClassification{year}"
+    )
+
+    # GSWE observations numbers tiles with f'000{num:03d}0000'
+    # From num=0 to num=52 represent 80d to -50d latitude, in increments of 4 per 10d
+    # From num=0 to num=140 represent -180d to 170d longitude, in increments of 4 per 10d
+    # Lat, lon are top-left of tile, but provided north is bottom of required latitude.
+    north += 10
+    n = round((80 - north) * 4 / 10)
+    e = round((east + 180) * 4 / 10)
+    fname = f"yearlyClassification{year}-000{n:03d}0000-000{e:03d}0000.tif"
+    fpath = folder / "gswe" / fname
+    if fpath.exists():
+        return fpath
+
+    url = f"{base_url}/{fname}"
+    bin_data = download_url(url)
+    fpath.parent.mkdir(exist_ok=True)
+    with open(fpath, "wb") as f:
+        f.write(bin_data)
+
+    return fpath
+
+
 def get_hand_file(north: int, east: int, folder: Path):
     north_str, east_str = degrees_to_north_east(north, east)
     base_url = "https://glo-30-hand.s3.amazonaws.com/v1/2021"
@@ -198,14 +243,18 @@ def get_nbyn_product(shp, shp_crs, folder, getter, n=1, preprocess=None, **kwarg
     ew_ran = range(math.floor(xlo / n) * n, math.ceil(xhi / n) * n, n)
     ns_ran = range(math.floor(ylo / n) * n, math.ceil(yhi / n) * n, n)
     paths = [getter(ns, ew, folder, **kwargs) for ew, ns in itertools.product(ew_ran, ns_ran)]
-    dem = xarray.open_mfdataset(paths, preprocess=preprocess)
-    box = dem.sel(x=slice(xlo, xhi), y=slice(yhi, ylo))
+    data = xarray.open_mfdataset(paths, preprocess=preprocess)
+    box = data.sel(x=slice(xlo, xhi), y=slice(yhi, ylo))
 
     return box.compute()
 
 
 def get_world_cover(shp, shp_crs, folder):
     return get_nbyn_product(shp, shp_crs, folder, get_world_cover_file, n=3)
+
+
+def get_global_surface_water(shp, shp_crs, folder, date):
+    return get_nbyn_product(shp, shp_crs, folder, get_global_surface_water_file, n=10, date=date)
 
 
 def _drop_last_pixel(ds):

@@ -20,25 +20,22 @@ import gff.util
 
 
 def parse_args(argv):
-    parser = argparse.ArgumentParser("Evaluate floodmaps stored in the same format as the labels")
+    parser = argparse.ArgumentParser(
+        "Evaluate floodmaps on full and kurosiwo-only test sets, blocking out permanent water"
+    )
 
     parser.add_argument("model_folder", type=Path)
     parser.add_argument(
-        "worldcover_path",
+        "blockout_path",
         type=Path,
-        help="Folder containing exported WorldCover files, one per ROI",
+        help="folder containing exported permanent water masks, one per ROI",
     )
     parser.add_argument("hydroatlas_path", type=Path)
-    # parser.add_argument(
-    #     "--blockout_ks_pw",
-    #     action="store_true",
-    #     help="When evaluating Kuro Siwo Labels, don't consider permanent water",
-    # )
-    # parser.add_argument(
-    #     "--blockout_worldcover_water",
-    #     action="store_true",
-    #     help="For main evaluation, don't consider pixels in WorldCover water class",
-    # )
+    parser.add_argument(
+        "--blockout_pw_using_gswe",
+        action="store_true",
+        help="use GSWE to determine what is considered permanent water and ignored",
+    )
     parser.add_argument(
         "--device",
         type=str,
@@ -142,7 +139,8 @@ def main(args):
         torch.save(coast_masks, coast_masks_fname)
     coast_masks = torch.load(coast_masks_fname)
 
-    blockout = gff.evaluation.processing_blockout_fnc(args.worldcover_path, "worldcover-water")
+    blockout_key = "gswe-3" if args.blockout_pw_using_gswe else "worldcover-water"
+    blockout = gff.evaluation.processing_blockout_fnc(args.blockout_path, blockout_key)
     eval_results, test_cm = gff.evaluation.evaluate_floodmaps(
         fnames,
         out_path,

@@ -80,6 +80,14 @@ def processing_blockout_fnc(cache_folder, block):
             mask = (cover == gff.constants.WORLDCOVER_PW_CLASS)[None]
             pred_tile[mask] = -100
             targ_tile[mask] = -100
+        elif n_classes == 2 and block == "gswe-3":
+            gswe_tif_path = cache_folder / f"{fmap_fname.stem}-gswe.tif"
+            tif = gff.util.tif_data_ram(gswe_tif_path)
+            cover = tif.read(window=window)
+            # Mask using strictest gswe class
+            mask = (cover == gff.constants.GSWE_STRICTEST_CLASS)[None]
+            pred_tile[mask] = -100
+            targ_tile[mask] = -100
         pred_tile = gff.util.flatten_classes(pred_tile, n_classes)
         targ_tile = gff.util.flatten_classes(targ_tile, n_classes)
         return pred_tile, targ_tile

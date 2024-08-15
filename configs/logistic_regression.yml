@@ -20,6 +20,7 @@ fold: 0
 weather_window: 20
 cache_local_in_ram: True
 cache_context_in_ram: False
+train_label_sources: null
 data_sources:
   - dem_local
   - hand

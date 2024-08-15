@@ -20,6 +20,7 @@ fold: 0
 weather_window: 1
 cache_local_in_ram: False
 cache_context_in_ram: True
+train_label_sources: null
 data_sources:
   - hydroatlas_basin
   - dem_context

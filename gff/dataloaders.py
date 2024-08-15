@@ -92,14 +92,16 @@ class FloodForecastDataset(torch.utils.data.Dataset):
         folder: Path,
         C: dict,
         meta_fnames: list[str],
+        label_sources: list[str] = None,
     ):
         self.folder = folder
         self.C = C
         self.floodmap_path = self.folder / "rois"
         self.meta_fnames = sorted(meta_fnames)
+        self.label_sources = label_sources
         self.metas = self.load_tile_metas()
         self.tiles = self.load_tile_geoms(self.metas)
-        self.hydroatlas_band_idxs = None
+        self.hydroatlas_band_idxs = None  # lazy evaluated and cached for speed
         self.dem_nodata = None
 
     def mk_context_geom(self, geom: shapely.Geometry):
@@ -121,7 +123,8 @@ class FloodForecastDataset(torch.utils.data.Dataset):
             if meta_fpath.exists():
                 with open(meta_fpath) as f:
                     meta = json.load(f)
-                metas.append(meta)
+                if self.label_sources is None or meta["type"] in self.label_sources:
+                    metas.append(meta)
         return metas
 
     def load_tile_geoms(self, metas: list[dict]):
@@ -330,7 +333,9 @@ def create_all(C, generator):
         test_ds = DebugFloodForecastDataset(data_folder, C)
     elif C["dataset"] == "forecast_dataset":
         train_fnames, val_fnames, test_fnames = read_partitions(data_folder, C["fold"])
-        train_ds = FloodForecastDataset(data_folder, C, meta_fnames=train_fnames)
+        train_ds = FloodForecastDataset(
+            data_folder, C, meta_fnames=train_fnames, label_sources=C["train_label_sources"]
+        )
         val_ds = FloodForecastDataset(data_folder, C, meta_fnames=val_fnames)
         test_ds = FloodForecastDataset(data_folder, C, meta_fnames=test_fnames)
     else:

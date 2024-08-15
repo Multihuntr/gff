@@ -99,6 +99,15 @@ def overlap_1d_np(min1, max1, min2, max2):
     return np.maximum(0, np.minimum(max1, max2) - np.maximum(min1, min2))
 
 
+def tc_footprint(folder, key):
+    fname = f"{key}_footprint.nc"
+    nc = rasterio.open(folder / fname)
+    footprint = nc.read()[0]
+    footprint_np = skimage.measure.find_contours(footprint)[0]
+    nc.transform.itransform(footprint_np)
+    return shapely.Polygon(footprint_np)
+
+
 def tcs_basins(
     dfo: geopandas.GeoDataFrame,
     basins: geopandas.GeoDataFrame,
@@ -143,12 +152,7 @@ def tcs_basins(
         tc_row = tcs.iloc[tc_i]
 
         # Read tc footprint
-        fname = f"{tc_row.key}_footprint.nc"
-        nc = rasterio.open(tc_path / fname)
-        footprint = nc.read()[0]
-        footprint_np = skimage.measure.find_contours(footprint)[0]
-        nc.transform.itransform(footprint_np)
-        footprint_geom = shapely.Polygon(footprint_np)
+        footprint_geom = tc_footprint(tc_path, tc_row.key)
 
         # Check if they overlap in space
         flood_spatial_overlap = shapely.intersection(dfo_row.geometry, footprint_geom)

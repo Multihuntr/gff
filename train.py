@@ -57,23 +57,8 @@ def main(args):
         yaml.safe_dump(C, f)
     gff.training.training_loop(C, model_folder, model, (train_dl, val_dl))
 
-    # Evaluate the model
-    out_path = gff.evaluation.model_inference(model_folder, model, test_dl)
-    tst_fnames = test_dl.dataset.meta_fnames
-    targ_path = Path(C["data_folder"]).expanduser() / "rois"
-    eval_results, test_cm = gff.evaluation.evaluate_floodmaps(
-        tst_fnames, out_path, targ_path, C["n_classes"], device=C["device"]
-    )
-    with open(model_folder / "eval_results.yml", "w") as f:
-        yaml.safe_dump(eval_results, f)
-
-    fig, ax = plt.subplots(1, 1, figsize=(7, 5))
-    test_cm.plot(ax=ax, labels=gff.constants.KUROSIWO_CLASS_NAMES[: C["n_classes"]])
-    ax.set_title("Test")
-    fig.tight_layout()
-    fig.savefig(model_folder / "test_cm.png")
-    fig.savefig(model_folder / "test_cm.eps")
-    plt.close(fig)
+    # Run inference on the test set with the model
+    gff.evaluation.model_inference(model_folder, model, test_dl)
 
 
 if __name__ == "__main__":

@@ -54,6 +54,12 @@ def main(args):
     for name, metric in zip(metric_names, metrics):
         print(f"{name:10s}  :  {metric.mean():5.3f} +- {metric.std():5.3f}")
 
+    latex_pieces = [
+        f"{metric.mean():4.2f} \pm {metric.std():4.2f}"
+        for name, metric in zip(metric_names, metrics)
+    ]
+    print("  &  ".join(latex_pieces))
+
 
 if __name__ == "__main__":
     main(parse_args(sys.argv[1:]))

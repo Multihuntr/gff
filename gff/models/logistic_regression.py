@@ -1,7 +1,6 @@
 import torch.nn as nn
 
 import numpy as np
-import pandas as pd
 
 
 class LogisticRegression(nn.Module):
@@ -19,6 +18,8 @@ class LogisticRegression(nn.Module):
 
 
 def print_weights(model, feature_names):
+    import pandas as pd
+
     print("Logistic regression model weights:\n")
     tensors = model.model.weight.cpu().detach().numpy()
     nin, kh, kw, nout = tensors.shape

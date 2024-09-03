@@ -1,10 +1,10 @@
 from pathlib import Path
 import torch
 
-import gff.normalisation
-
 
 def get_norms(C):
+    import gff.normalisation
+
     norms = {}
     data_folder = Path(C["data_folder"])
 

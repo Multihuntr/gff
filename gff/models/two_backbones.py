@@ -1,15 +1,11 @@
-import warnings
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# from . import utae, metnet
 import gff.models.utae as utae
 import gff.models.metnet as metnet
 import gff.models.unet3d as unet3d
 import gff.models.logistic_regression as lr_model
-import gff.util
 
 
 def get_empty_norms(era5_bands: int, era5l_bands: int, glofas_bands: int, hydroatlas_bands: int):

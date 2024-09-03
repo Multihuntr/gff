@@ -16,3 +16,4 @@ runs
 runs_old
 exemplars
 paperruns
+*.egg-info

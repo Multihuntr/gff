@@ -4,7 +4,7 @@
 
 A globally distributed dataset for learning flood forecasting featuring both generated and labelled flood maps.
 
-Download here: [Zenodo](https://zenodo.org/records/11380970)
+Dataset download here: [Zenodo](https://zenodo.org/records/13133267)
 
 # This repository
 
@@ -38,7 +38,12 @@ To generate new data using GFF's methodology/code, see `./HOWTO-GENERATE.md`
 To cite us, use:
 
 ```
-TBD
+@article{victor2024off,
+  title={Off to new Shores: A Dataset \& Benchmark for (near-) coastal Flood Inundation Forecasting},
+  author={Victor, Brandon and Letard, Mathilde and Naylor, Peter and Douch, Karim and Long{\'e}p{\'e}, Nicolas and He, Zhen and Ebel, Patrick},
+  journal={arXiv preprint arXiv:2409.18591},
+  year={2024}
+}
 ```
 
 # Acknowledgements

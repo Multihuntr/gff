@@ -18,7 +18,7 @@ nan_impute_val: 'zero'
 dataset: forecast_dataset
 fold: 0
 weather_window: 20
-cache_local_in_ram: False
+cache_local_in_ram: True
 cache_context_in_ram: True
 train_label_sources:
   - kurosiwo

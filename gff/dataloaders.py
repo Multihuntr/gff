@@ -20,13 +20,16 @@ class DebugFloodForecastDataset(torch.utils.data.Dataset):
     def __init__(self, folder, C):
         self.folder = folder
         self.n_examples = C["n_examples"]
-        self.n_times = C["n_times"]
+        self.n_repeats = C["n_repeats"]
+        self.weather_window = C["weather_window"]
         self.data_sources = C["data_sources"]
 
-        if C["half_extent_context"]:
-            c_res = 16
+        if C["double_res_context"] and not C["half_extent_context"]:
+            c_res = (gff.constants.CONTEXT_RESOLUTION * 2,) * 2
+        elif not C["double_res_context"] and C["half_extent_context"]:
+            c_res = (gff.constants.CONTEXT_RESOLUTION // 2,) * 2
         else:
-            c_res = 32
+            c_res = (gff.constants.CONTEXT_RESOLUTION,) * 2
 
         self.bogus_geom = shapely.Point([124.225, 9.9725])
         if C["checkerboard"]:
@@ -39,13 +42,13 @@ class DebugFloodForecastDataset(torch.utils.data.Dataset):
 
         if "era5" in C["data_sources"]:
             n_era5 = len(C["era5_keys"])
-            self.era5 = np.random.randn(self.n_examples, self.n_times, n_era5, c_res, c_res)
+            self.era5 = np.random.randn(self.n_examples, self.weather_window, n_era5, c_res, c_res)
             self.era5 = self.era5.astype(np.float32)
 
         if "era5_land" in C["data_sources"]:
             n_era5_land = len(C["era5_land_keys"])
             self.era5_land = np.random.randn(
-                self.n_examples, self.n_times, n_era5_land, c_res, c_res
+                self.n_examples, self.weather_window, n_era5_land, c_res, c_res
             )
             self.era5_land = self.era5_land.astype(np.float32)
 
@@ -70,10 +73,10 @@ class DebugFloodForecastDataset(torch.utils.data.Dataset):
             self.s1_lead_days = self.s1_lead_days.astype(np.int64)
 
     def __len__(self):
-        return self.n_examples
+        return self.n_examples * self.n_repeats
 
     def __getitem__(self, idx):
-        raster_data = {k: getattr(self, k)[idx] for k in self.data_sources}
+        raster_data = {k: getattr(self, k)[idx].copy() for k in self.data_sources}
         example = {
             "floodmap": self.floodmaps[idx],
             "continent": 1,
@@ -280,9 +283,7 @@ class FloodForecastDataset(torch.utils.data.Dataset):
             s1_stem = gff.util.get_s1_stem_from_meta(meta)
             s1_path = self.floodmap_path / f"{s1_stem}-s1.tif"
             result["s1"] = gff.util.get_tile(s1_path, geom.bounds, align=True, cache=cache_local)
-            result["fpaths"]["s1"] = fpath
-            if np.isnan(result["s1"]).sum() > 0:
-                raise Exception("NO! It can't be!")
+            result["fpaths"]["s1"] = s1_path
 
         return result
 

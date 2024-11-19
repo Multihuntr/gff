@@ -9,7 +9,7 @@ model: debug_model
 dataset: debug_dataset
 checkerboard: True
 n_examples: 4
-n_times: 12
+weather_window: 20
 data_sources:
   - era5
   - era5_land
@@ -20,7 +20,8 @@ data_sources:
   - s1
 
 n_classes: 3
-half_res_context: True
+double_res_context: True
+half_extent_context: True
 batch_size: 1
 lr: 0.001
 lr_decay: 0.9999
@@ -28,6 +29,7 @@ epochs: 200
 num_workers: 0
 scalar_freq: 2
 img_freq: 2
+augments: []
 
 hydroatlas_keys:
   - aet_mm_uyr

@@ -4,22 +4,23 @@ channels:
   - pytorch
   - nvidia
 dependencies:
-  - cdsapi
-  - geopandas
-  - pyogrio
-  - rasterio
-  - earthengine-api
-  - pytorch
-  - pytorch-cuda 11.8
-  - torchvision
-  - torchmetrics
-  - einops
-  - xarray
-  - rioxarray
-  - dask
-  - netcdf4
-  - richdem
-  - asf_search
-  - scikit-image
-  - openpyxl
-  - tensorboard
+  - python=3.12
+  - cdsapi=0.7.4
+  - geopandas=1.0.1
+  - pyogrio=0.8.0
+  - rasterio=1.3.9
+  - earthengine-api=1.4.0
+  - pytorch=2.4
+  - pytorch-cuda=11.8
+  - torchvision=0.19.1
+  - torchmetrics=1.5.2
+  - einops=0.8.0
+  - xarray=2024.10.0
+  - rioxarray=0.17.0
+  - dask=2024.11.2
+  - netcdf4=1.7.1
+  - richdem=2.3
+  - asf_search=8.0.1
+  - scikit-image=0.24.0
+  - openpyxl=3.1.5
+  - tensorboard=2.18.0

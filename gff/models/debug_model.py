@@ -12,8 +12,12 @@ class DebugModel(nn.Module):
 
     def forward(self, ex):
         # Nah, we ignorin' the example and optimising an internal embedding
-        B, N, cC, cH, cW = ex["era5_land"].shape
-        idx = torch.tensor(0, device=ex["era5_land"].device)
+        for k in ["s1", "dem_local", "hand"]:
+            if k in ex:
+                B, _, _, _ = ex[k].shape
+                device = ex[k].device
+                break
+        idx = torch.tensor(0, device=device)
         vec = self.guess(idx)
         return vec.reshape((1, self.n_predict, 224, 224)).repeat((B, 1, 1, 1))
 
